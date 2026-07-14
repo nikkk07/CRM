@@ -1,0 +1,67 @@
+Phase 4 — AI Agents: CODE COMPLETE
+
+PROVIDER ROUTING:
+✓ LLMProvider interface with OllamaProvider + GroqProvider
+✓ contains_pii flag routes to appropriate provider
+✓ Lead PII → ALWAYS OllamaProvider (local)
+✓ Public docs → GroqProvider (free tier) with 429 backoff
+✓ All LLM calls logged to audit_log
+
+AGENT A — DGCA/Policy Q&A:
+✓ RAG over policy_doc table using pgvector
+✓ Embedding via local Ollama (nomic-embed-text)
+✓ Answer generation via Groq (public docs only)
+✓ Cites source documents with similarity scores
+✓ No PII in prompts
+
+AGENT B — Lead Opener Draft:
+✓ Generate first-contact WhatsApp message
+✓ HARD RULE: contains_pii=True forces local Ollama
+✓ Draft goes to outbox_message (status=draft)
+✓ Human approval gate (existing wa.me flow)
+✓ Never auto-sends
+
+BACKEND STATUS:
+✓ /api/policy-docs (GET/POST) - manage docs
+✓ /api/policy-docs/upload - upload .txt/.md files
+✓ /api/ai/policy-qa - ask questions (Groq)
+✓ /api/ai/lead-opener - generate draft (Ollama)
+✓ Migration 004 applied (embedding column, config, index)
+
+FRONTEND STATUS:
+✓ PolicyQA component (modal with Q&A interface)
+✓ PolicyDocs component (4th tab, upload/create docs)
+✓ LeadDetail: "AI Draft Opener" button
+✓ App.jsx: "Policy Q&A" button in nav
+✓ All integrated
+
+DATABASE:
+✓ policy_doc.embedding vector(768) column
+✓ config: ollama_model, embedding_model
+✓ ivfflat index for similarity search
+
+SETUP REQUIRED:
+1. Install Ollama: brew install ollama
+2. Pull models:
+   ollama pull llama3.2:3b-instruct-q4_K_M
+   ollama pull nomic-embed-text
+3. Start Ollama service:
+   ollama serve
+4. Set GROQ_API_KEY in backend/.env (get from console.groq.com)
+5. Optional: Raise GPU memory at boot:
+   sudo nvram boot-args="iogpu.wired_limit_mb=4096"
+
+NEXT STEPS:
+1. Install Ollama and pull models
+2. Get Groq API key and update .env
+3. Start Ollama service (ollama serve)
+4. Upload DGCA circulars via Policy Docs tab
+5. Test Policy Q&A
+6. Test Lead Opener from lead detail view
+7. Check audit_log for all LLM calls
+
+Login: +919999999999 / admin123
+Frontend: http://localhost:3000
+Backend: http://localhost:8000
+
+Phase 4 complete. Stop.

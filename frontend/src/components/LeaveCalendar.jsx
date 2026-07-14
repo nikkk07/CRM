@@ -1,0 +1,245 @@
+import { useState, useEffect } from 'react';
+import { formatDate } from '../utils/formatters';
+import { showToast } from '../utils/toast';
+import LoadingSpinner from './LoadingSpinner';
+
+export default function LeaveCalendar({ employeeId }) {
+  const [employeeDetail, setEmployeeDetail] = useState(null);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadEmployeeDetail();
+  }, [employeeId, currentMonth]);
+
+  const loadEmployeeDetail = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`http://localhost:8000/api/employees/${employeeId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEmployeeDetail(data);
+      }
+    } catch (error) {
+      showToast('Failed to load leave data', 'error');
+    }
+    setLoading(false);
+  };
+
+  const markLeaveDay = async (date, type) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`http://localhost:8000/api/employees/${employeeId}/leave`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ leave_date: date, leave_type: type })
+      });
+      
+      if (!res.ok) {
+        const error = await res.json();
+        showToast(error.detail || 'Failed to mark leave', 'error');
+        return;
+      }
+      
+      showToast('Leave marked', 'success');
+      loadEmployeeDetail();
+    } catch (error) {
+      showToast('Failed to mark leave', 'error');
+    }
+  };
+
+  const unmarkLeaveDay = async (date) => {
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`http://localhost:8000/api/employees/${employeeId}/leave/${date}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      showToast('Leave unmarked', 'success');
+      loadEmployeeDetail();
+    } catch (error) {
+      showToast('Failed to unmark leave', 'error');
+    }
+  };
+
+  const generateCalendar = () => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+    
+    const days = [];
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      days.push(null);
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+      days.push(day);
+    }
+    return days;
+  };
+
+  const getDayLeaveType = (day) => {
+    if (!day || !employeeDetail) return null;
+    const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const leaveDay = employeeDetail.leave_days?.find(ld => ld.date === dateStr);
+    return leaveDay?.type || null;
+  };
+
+  const LEAVE_TYPE_COLORS = {
+    leave: 'bg-red-200 border-red-400',
+    half_day: 'bg-yellow-200 border-yellow-400',
+    paid_leave: 'bg-blue-200 border-blue-400'
+  };
+
+  if (loading) return <LoadingSpinner size="lg" text="Loading calendar..." />;
+  if (!employeeDetail) return <div className="text-center py-12 text-gray-500">Failed to load</div>;
+
+  const paidLeaveQuota = employeeDetail.paid_leave_quota || 0;
+  const paidLeaveUsed = employeeDetail.paid_leave_used || 0;
+  const paidLeaveRemaining = employeeDetail.paid_leave_remaining || 0;
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-4xl mx-auto">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-2xl font-bold text-gray-900">My Leave Calendar</h2>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))}
+            className="px-3 py-1 border rounded hover:bg-gray-50"
+          >
+            ←
+          </button>
+          <span className="px-3 py-1 font-medium">
+            {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+          </span>
+          <button
+            onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))}
+            className="px-3 py-1 border rounded hover:bg-gray-50"
+          >
+            →
+          </button>
+        </div>
+      </div>
+
+      <p className="text-sm text-gray-600 mb-6">
+        Click a day to mark leave. Unmarked days = Present. Changes are immediate.
+      </p>
+
+      {/* Paid Leave Quota Display - MONTHLY */}
+      {paidLeaveQuota > 0 && (
+        <div className="mb-6 p-4 bg-blue-50 rounded-lg border-2 border-blue-300">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-sm font-bold text-blue-900">Monthly Paid Leave Quota</span>
+            <span className="text-3xl font-bold text-blue-600">
+              {paidLeaveRemaining} / {paidLeaveQuota}
+            </span>
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-3">
+            <div 
+              className="bg-blue-600 h-3 rounded-full transition-all"
+              style={{ width: `${(paidLeaveRemaining / paidLeaveQuota) * 100}%` }}
+            />
+          </div>
+          <div className="flex justify-between mt-2 text-sm">
+            <span className="text-blue-700">Used this month: {paidLeaveUsed} days</span>
+            <span className={`font-bold ${paidLeaveRemaining === 0 ? 'text-red-600' : 'text-green-600'}`}>
+              {paidLeaveRemaining === 0 ? '❌ No More Paid Leaves This Month' : `✓ ${paidLeaveRemaining} days remaining`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Monthly Tally */}
+      <div className="flex gap-4 mb-4 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-4 rounded bg-red-200"></span>
+          <span>Leave: {employeeDetail.leave_counts?.leave || 0}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-4 rounded bg-yellow-200"></span>
+          <span>Half Day: {employeeDetail.leave_counts?.half_day || 0}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-4 rounded bg-blue-200"></span>
+          <span>Paid Leave: {employeeDetail.leave_counts?.paid_leave || 0}</span>
+        </div>
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="grid grid-cols-7 gap-2">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+          <div key={day} className="text-center text-xs font-medium text-gray-500 py-2">
+            {day}
+          </div>
+        ))}
+        {generateCalendar().map((day, idx) => {
+          if (!day) {
+            return <div key={idx} className="aspect-square"></div>;
+          }
+          const leaveType = getDayLeaveType(day);
+          const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          
+          return (
+            <div key={idx} className="relative">
+              <button
+                className={`w-full aspect-square border-2 rounded flex items-center justify-center text-sm font-medium transition hover:shadow-md
+                  ${leaveType ? LEAVE_TYPE_COLORS[leaveType] : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'}
+                `}
+                onClick={() => {
+                  if (leaveType) {
+                    if (window.confirm('Unmark this leave day?')) {
+                      unmarkLeaveDay(dateStr);
+                    }
+                  } else {
+                    let type = null;
+                    if (paidLeaveQuota > 0) {
+                      type = prompt(`Select leave type (Resets monthly):
+1 = Leave (Full day salary deducted)
+2 = Half Day (0.5 day salary deducted)
+3 = Paid Leave (No deduction) - ${paidLeaveRemaining}/${paidLeaveQuota} left this month
+
+Enter 1, 2, or 3:`);
+                    } else {
+                      type = prompt('Select leave type:\n1 = Leave\n2 = Half Day\n\nEnter 1 or 2:');
+                    }
+                    
+                    if (type === '1') markLeaveDay(dateStr, 'leave');
+                    else if (type === '2') markLeaveDay(dateStr, 'half_day');
+                    else if (type === '3') {
+                      if (paidLeaveRemaining > 0) {
+                        markLeaveDay(dateStr, 'paid_leave');
+                      } else {
+                        alert('❌ No More Paid Leaves Available This Month!\nYou have used all ' + paidLeaveQuota + ' paid leave days for this month.');
+                      }
+                    }
+                  }
+                }}
+              >
+                {day}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+        <p className="text-xs text-gray-600">
+          ℹ️ Paid leave quota resets every month. Leave records preserved for audit.
+        </p>
+        {employeeDetail.monthly_salary && (
+          <p className="text-xs text-gray-600 mt-2">
+            💰 Current Net Salary: ₹{employeeDetail.net_salary ? parseFloat(employeeDetail.net_salary).toLocaleString('en-IN') : parseFloat(employeeDetail.monthly_salary).toLocaleString('en-IN')}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
