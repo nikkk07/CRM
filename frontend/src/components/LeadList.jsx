@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function LeadList({ leads, onSelectLead, slaMinutes }) {
+export default function LeadList({ leads, onSelectLead }) {
   const [filter, setFilter] = useState('all');
   
   const filteredLeads = leads.filter(l => {
@@ -23,15 +23,6 @@ export default function LeadList({ leads, onSelectLead, slaMinutes }) {
       hour12: true
     });
   };
-  
-  const filteredLeads = leads.filter(l => {
-    if (filter === 'pending') return !l.first_contacted_at;
-    if (filter === 'interested') return l.status === 'Interested';
-    if (filter === 'not-interested') return l.status === 'Not interested';
-    if (filter === 'not-reachable') return l.status === 'Not reachable' || l.status === 'Wrong number';
-    if (filter === 'callback') return l.status === 'Callback';
-    return true;
-  });
 
   return (
     <div>

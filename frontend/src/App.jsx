@@ -314,7 +314,6 @@ export default function App() {
               <LeadList
                 leads={leads}
                 onSelectLead={setSelectedLead}
-                slaMinutes={slaMinutes}
               />
             </div>
           </>
