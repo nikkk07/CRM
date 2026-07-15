@@ -230,7 +230,7 @@ async def get_leads(current_emp = Depends(get_current_employee)):
         cur.execute("""
             SELECT l.id, l.name, l.phone, l.email, l.address, l.course_interest, 
                    l.utm_source, l.utm_medium, l.utm_campaign, l.status, l.assigned_to,
-                   l.created_at, l.first_contacted_at, l.dedup_key,
+                   l.created_at, l.first_contacted_at, l.dedup_key, l.last_note,
                    (SELECT COUNT(*) FROM contact_attempt WHERE lead_id = l.id AND disposition = 'Not reachable') as not_reachable_count,
                    EXTRACT(EPOCH FROM (NOW() - l.created_at))/60 as age_minutes
             FROM lead l
@@ -244,7 +244,7 @@ async def get_leads(current_emp = Depends(get_current_employee)):
                 "course_interest": r[5], "utm_source": r[6], "utm_medium": r[7], "utm_campaign": r[8],
                 "status": r[9], "assigned_to": str(r[10]) if r[10] else None,
                 "created_at": r[11].isoformat(), "first_contacted_at": r[12].isoformat() if r[12] else None,
-                "dedup_key": r[13], "not_reachable_count": r[14], "age_minutes": float(r[15])
+                "dedup_key": r[13], "last_note": r[14], "not_reachable_count": r[15], "age_minutes": float(r[16])
             })
     return leads
 
@@ -253,31 +253,69 @@ async def log_contact(lead_id: str, data: dict, current_emp = Depends(get_curren
     with get_db() as conn:
         cur = conn.cursor()
         
+        # Get lead details
+        cur.execute("""
+            SELECT name, phone, email, course_interest, address 
+            FROM lead WHERE id = %s
+        """, (lead_id,))
+        lead_row = cur.fetchone()
+        
+        if not lead_row:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        name, phone, email, course_interest, address = lead_row
+        disposition = data.get('disposition')
+        note = data.get('note')
+        
         cur.execute(
             """INSERT INTO contact_attempt (lead_id, staff_id, channel, disposition, note, connected, attempted_at)
                VALUES (%s, %s, %s, %s, %s, %s, NOW()) RETURNING id""",
-            (lead_id, current_emp["id"], data.get('channel', 'phone'), data.get('disposition'), 
-             data.get('note'), data.get('disposition') in ['Connected', 'Interested', 'Callback'])
+            (lead_id, current_emp["id"], data.get('channel', 'phone'), disposition, 
+             note, disposition in ['Connected', 'Interested', 'Callback'])
         )
         attempt_id = cur.fetchone()[0]
         
-        cur.execute("UPDATE lead SET first_contacted_at = COALESCE(first_contacted_at, NOW()) WHERE id = %s", (lead_id,))
+        cur.execute("UPDATE lead SET first_contacted_at = COALESCE(first_contacted_at, NOW()), status = %s, last_note = %s WHERE id = %s", 
+                    (disposition, note, lead_id))
         
-        if data.get('disposition') == 'Not interested':
+        # Insert into respective disposition table
+        if disposition == 'Interested':
+            cur.execute("""
+                INSERT INTO interested (lead_id, name, phone, email, course_interest, address, note, marked_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (lead_id, name, phone, email, course_interest, address, note, current_emp["id"]))
+        
+        elif disposition == 'Not interested':
+            cur.execute("""
+                INSERT INTO not_interested (lead_id, name, phone, email, course_interest, address, note, marked_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (lead_id, name, phone, email, course_interest, address, note, current_emp["id"]))
             cur.execute("UPDATE lead SET status = 'closed' WHERE id = %s", (lead_id,))
         
-        cur.execute(
-            "SELECT COUNT(*) FROM contact_attempt WHERE lead_id = %s AND disposition = 'Not reachable'",
-            (lead_id,)
-        )
-        not_reachable_count = cur.fetchone()[0]
-        if not_reachable_count >= 3:
-            cur.execute("UPDATE lead SET status = 'parked' WHERE id = %s", (lead_id,))
+        elif disposition == 'Not reachable':
+            cur.execute("""
+                INSERT INTO not_reachable (lead_id, name, phone, email, course_interest, address, note, marked_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (lead_id, name, phone, email, course_interest, address, note, current_emp["id"]))
+            
+            cur.execute(
+                "SELECT COUNT(*) FROM contact_attempt WHERE lead_id = %s AND disposition = 'Not reachable'",
+                (lead_id,)
+            )
+            not_reachable_count = cur.fetchone()[0]
+            if not_reachable_count >= 3:
+                cur.execute("UPDATE lead SET status = 'parked' WHERE id = %s", (lead_id,))
+        
+        elif disposition == 'Callback':
+            cur.execute("""
+                INSERT INTO callback (lead_id, name, phone, email, course_interest, address, note, marked_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (lead_id, name, phone, email, course_interest, address, note, current_emp["id"]))
         
         cur.execute(
             """INSERT INTO audit_log (actor, action, entity, payload)
                VALUES (%s, %s, %s, %s)""",
-            (current_emp["id"], "contact", "lead", json.dumps({"lead_id": lead_id, "disposition": data.get('disposition')}))
+            (current_emp["id"], "contact", "lead", json.dumps({"lead_id": lead_id, "disposition": disposition}))
         )
         
     return {"id": str(attempt_id)}
@@ -527,7 +565,7 @@ async def sync_snapshot(current_emp = Depends(get_current_employee)):
         
         cur.execute("""
             SELECT id, name, phone, email, address, course_interest, utm_source, utm_medium, utm_campaign,
-                   status, assigned_to, created_at, first_contacted_at, dedup_key
+                   status, assigned_to, created_at, first_contacted_at, dedup_key, last_note
             FROM lead
             ORDER BY created_at DESC
             LIMIT 500
@@ -538,7 +576,7 @@ async def sync_snapshot(current_emp = Depends(get_current_employee)):
                 "course_interest": r[5], "utm_source": r[6], "utm_medium": r[7], "utm_campaign": r[8],
                 "status": r[9], "assigned_to": str(r[10]) if r[10] else None,
                 "created_at": r[11].isoformat(), "first_contacted_at": r[12].isoformat() if r[12] else None,
-                "dedup_key": r[13]
+                "dedup_key": r[13], "last_note": r[14]
             }
             for r in cur.fetchall()
         ]
@@ -1338,6 +1376,113 @@ async def search_policy_docs(q: str, current_emp = Depends(get_current_employee)
                 "id": str(r[0]), "title": r[1], "content": r[2][:300], "created_at": r[3].isoformat()
             })
     return docs
+
+@app.get("/api/dispositions/stats")
+async def get_disposition_stats(current_emp = Depends(get_current_employee)):
+    """Get counts for each disposition table"""
+    with get_db() as conn:
+        cur = conn.cursor()
+        
+        cur.execute("SELECT COUNT(*) FROM interested")
+        interested_count = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(*) FROM not_interested")
+        not_interested_count = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(*) FROM not_reachable")
+        not_reachable_count = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(*) FROM callback")
+        callback_count = cur.fetchone()[0]
+        
+        return {
+            "interested": interested_count,
+            "not_interested": not_interested_count,
+            "not_reachable": not_reachable_count,
+            "callback": callback_count
+        }
+
+@app.get("/api/dispositions/interested")
+async def get_interested_leads(current_emp = Depends(get_current_employee)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, lead_id, name, phone, email, course_interest, address, note, 
+                   marked_by, marked_at
+            FROM interested
+            ORDER BY marked_at DESC
+        """)
+        return [
+            {
+                "id": str(r[0]), "lead_id": str(r[1]), "name": r[2], "phone": r[3],
+                "email": r[4], "course_interest": r[5], "address": r[6], "note": r[7],
+                "marked_by": str(r[8]) if r[8] else None, 
+                "marked_at": r[9].isoformat() if r[9] else None
+            }
+            for r in cur.fetchall()
+        ]
+
+@app.get("/api/dispositions/not-interested")
+async def get_not_interested_leads(current_emp = Depends(get_current_employee)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, lead_id, name, phone, email, course_interest, address, note, 
+                   marked_by, marked_at
+            FROM not_interested
+            ORDER BY marked_at DESC
+        """)
+        return [
+            {
+                "id": str(r[0]), "lead_id": str(r[1]), "name": r[2], "phone": r[3],
+                "email": r[4], "course_interest": r[5], "address": r[6], "note": r[7],
+                "marked_by": str(r[8]) if r[8] else None, 
+                "marked_at": r[9].isoformat() if r[9] else None
+            }
+            for r in cur.fetchall()
+        ]
+
+@app.get("/api/dispositions/not-reachable")
+async def get_not_reachable_leads(current_emp = Depends(get_current_employee)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, lead_id, name, phone, email, course_interest, address, note, 
+                   marked_by, marked_at
+            FROM not_reachable
+            ORDER BY marked_at DESC
+        """)
+        return [
+            {
+                "id": str(r[0]), "lead_id": str(r[1]), "name": r[2], "phone": r[3],
+                "email": r[4], "course_interest": r[5], "address": r[6], "note": r[7],
+                "marked_by": str(r[8]) if r[8] else None, 
+                "marked_at": r[9].isoformat() if r[9] else None
+            }
+            for r in cur.fetchall()
+        ]
+
+@app.get("/api/dispositions/callback")
+async def get_callback_leads(current_emp = Depends(get_current_employee)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, lead_id, name, phone, email, course_interest, address, note, 
+                   callback_date, callback_reason, marked_by, marked_at
+            FROM callback
+            ORDER BY marked_at DESC
+        """)
+        return [
+            {
+                "id": str(r[0]), "lead_id": str(r[1]), "name": r[2], "phone": r[3],
+                "email": r[4], "course_interest": r[5], "address": r[6], "note": r[7],
+                "callback_date": r[8].isoformat() if r[8] else None,
+                "callback_reason": r[9],
+                "marked_by": str(r[10]) if r[10] else None, 
+                "marked_at": r[11].isoformat() if r[11] else None
+            }
+            for r in cur.fetchall()
+        ]
 
 if __name__ == "__main__":
     import uvicorn
