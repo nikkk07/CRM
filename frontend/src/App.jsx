@@ -9,7 +9,6 @@ import EmployeeDirectory from './components/EmployeeDirectory';
 import MyProfile from './components/MyProfile';
 import LeaveCalendar from './components/LeaveCalendar';
 import PolicyDocs from './components/PolicyDocs';
-import DispositionStats from './components/DispositionStats';
 import { syncData, API_URL } from './api';
 
 export default function App() {
@@ -276,8 +275,6 @@ export default function App() {
                 <div className="text-2xl font-bold text-blue-600">{followups.length}</div>
               </div>
             </div>
-            
-            <DispositionStats />
 
             {followups.length > 0 && (
               <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4 mb-4">

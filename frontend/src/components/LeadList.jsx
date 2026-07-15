@@ -93,7 +93,7 @@ export default function LeadList({ leads, onSelectLead }) {
               </div>
               
               {lead.last_note && (
-                <div className="mt-2 p-2 bg-gray-50 rounded text-sm text-gray-700 italic">
+                <div className="mt-2 p-2 bg-gray-50 rounded text-sm text-gray-700 text-center">
                   💬 {lead.last_note}
                 </div>
               )}
