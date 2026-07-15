@@ -18,31 +18,52 @@ export default function LeadList({ leads, onSelectLead, slaMinutes }) {
   };
   
   const filteredLeads = leads.filter(l => {
-    if (filter === 'untouched') return !l.first_contacted_at;
-    if (filter === 'overdue') return !l.first_contacted_at && l.age_minutes > slaMinutes;
+    if (filter === 'pending') return !l.first_contacted_at;
+    if (filter === 'interested') return l.status === 'Interested';
+    if (filter === 'not-interested') return l.status === 'Not interested';
+    if (filter === 'not-reachable') return l.status === 'Not reachable' || l.status === 'Wrong number';
+    if (filter === 'callback') return l.status === 'Callback';
     return true;
   });
 
   return (
     <div>
-      <div className="flex gap-2 mb-4">
+      <div className="flex gap-2 mb-4 flex-wrap">
         <button
           onClick={() => setFilter('all')}
-          className={`px-3 py-1 rounded ${filter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+          className={`px-3 py-1 rounded text-sm ${filter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
         >
           All ({leads.length})
         </button>
         <button
-          onClick={() => setFilter('untouched')}
-          className={`px-3 py-1 rounded ${filter === 'untouched' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+          onClick={() => setFilter('pending')}
+          className={`px-3 py-1 rounded text-sm ${filter === 'pending' ? 'bg-orange-600 text-white' : 'bg-gray-200'}`}
         >
-          Untouched ({leads.filter(l => !l.first_contacted_at).length})
+          Pending ({leads.filter(l => !l.first_contacted_at).length})
         </button>
         <button
-          onClick={() => setFilter('overdue')}
-          className={`px-3 py-1 rounded ${filter === 'overdue' ? 'bg-red-600 text-white' : 'bg-gray-200'}`}
+          onClick={() => setFilter('interested')}
+          className={`px-3 py-1 rounded text-sm ${filter === 'interested' ? 'bg-green-600 text-white' : 'bg-gray-200'}`}
         >
-          Overdue ({leads.filter(l => !l.first_contacted_at && l.age_minutes > slaMinutes).length})
+          Interested ({leads.filter(l => l.status === 'Interested').length})
+        </button>
+        <button
+          onClick={() => setFilter('not-interested')}
+          className={`px-3 py-1 rounded text-sm ${filter === 'not-interested' ? 'bg-gray-600 text-white' : 'bg-gray-200'}`}
+        >
+          Not Interested ({leads.filter(l => l.status === 'Not interested').length})
+        </button>
+        <button
+          onClick={() => setFilter('not-reachable')}
+          className={`px-3 py-1 rounded text-sm ${filter === 'not-reachable' ? 'bg-yellow-600 text-white' : 'bg-gray-200'}`}
+        >
+          Not Reachable ({leads.filter(l => l.status === 'Not reachable' || l.status === 'Wrong number').length})
+        </button>
+        <button
+          onClick={() => setFilter('callback')}
+          className={`px-3 py-1 rounded text-sm ${filter === 'callback' ? 'bg-purple-600 text-white' : 'bg-gray-200'}`}
+        >
+          Callback ({leads.filter(l => l.status === 'Callback').length})
         </button>
       </div>
       
