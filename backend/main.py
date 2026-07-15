@@ -234,7 +234,6 @@ async def get_leads(current_emp = Depends(get_current_employee)):
                    (SELECT COUNT(*) FROM contact_attempt WHERE lead_id = l.id AND disposition = 'Not reachable') as not_reachable_count,
                    EXTRACT(EPOCH FROM (NOW() - l.created_at))/60 as age_minutes
             FROM lead l
-            WHERE l.status NOT IN ('parked', 'Not interested')
             ORDER BY l.created_at DESC
         """)
         leads = []
@@ -242,7 +241,7 @@ async def get_leads(current_emp = Depends(get_current_employee)):
             leads.append({
                 "id": str(r[0]), "name": r[1], "phone": r[2], "email": r[3], "address": r[4],
                 "course_interest": r[5], "utm_source": r[6], "utm_medium": r[7], "utm_campaign": r[8],
-                "status": r[9], "assigned_to": str(r[10]) if r[10] else None,
+                "status": r[9] or "new", "assigned_to": str(r[10]) if r[10] else None,
                 "created_at": r[11].isoformat(), "first_contacted_at": r[12].isoformat() if r[12] else None,
                 "dedup_key": r[13], "last_note": r[14], "not_reachable_count": r[15], "age_minutes": float(r[16])
             })
