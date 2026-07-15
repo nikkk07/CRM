@@ -1,15 +1,6 @@
 import { useState } from 'react';
 import QuoteGenerator from './QuoteGenerator';
 
-const DISPOSITIONS = [
-  'Connected',
-  'Not reachable',
-  'Wrong number',
-  'Interested',
-  'Not interested',
-  'Callback'
-];
-
 export default function LeadDetail({ lead, onClose, onContact }) {
   const [disposition, setDisposition] = useState('');
   const [note, setNote] = useState('');
@@ -17,14 +8,14 @@ export default function LeadDetail({ lead, onClose, onContact }) {
   const [followupReason, setFollowupReason] = useState('');
   const [showQuoteGen, setShowQuoteGen] = useState(false);
   
-  const handleContact = async (channel) => {
+  const handleSave = async () => {
     if (!disposition) {
       alert('Select a disposition first');
       return;
     }
     
     await onContact(lead.id, {
-      channel,
+      channel: 'phone',
       disposition,
       note
     });
@@ -79,18 +70,18 @@ export default function LeadDetail({ lead, onClose, onContact }) {
           <div className="mb-4">
             <button
               onClick={() => setShowQuoteGen(true)}
-              className="w-full bg-purple-600 text-white py-2 rounded hover:bg-purple-700"
+              className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700"
             >
               📄 Generate Quote
             </button>
           </div>
           
           <div className="mb-4">
-            <h3 className="font-semibold mb-2">Contact Lead</h3>
-            <div className="flex gap-2 mb-3">
+            <h3 className="font-semibold mb-3 text-lg">Contact Lead</h3>
+            <div className="flex gap-3 mb-4">
               <a
                 href={`tel:${lead.phone}`}
-                className="flex-1 bg-green-600 text-white py-3 rounded-lg text-center hover:bg-green-700"
+                className="flex-1 bg-green-600 text-white py-3 rounded-lg text-center hover:bg-green-700 font-semibold"
               >
                 📞 Call
               </a>
@@ -98,7 +89,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
                 href={waLink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 bg-green-500 text-white py-3 rounded-lg text-center hover:bg-green-600"
+                className="flex-1 bg-green-500 text-white py-3 rounded-lg text-center hover:bg-green-600 font-semibold"
               >
                 💬 WhatsApp
               </a>
@@ -106,21 +97,48 @@ export default function LeadDetail({ lead, onClose, onContact }) {
           </div>
           
           <div className="mb-4">
-            <label className="block text-sm font-semibold mb-2">Disposition *</label>
+            <label className="block text-sm font-semibold mb-2">Mark as *</label>
             <div className="grid grid-cols-2 gap-2">
-              {DISPOSITIONS.map(disp => (
-                <button
-                  key={disp}
-                  onClick={() => setDisposition(disp)}
-                  className={`py-2 px-3 rounded border-2 transition ${
-                    disposition === disp
-                      ? 'border-blue-600 bg-blue-50 font-semibold'
-                      : 'border-gray-300 hover:border-blue-400'
-                  }`}
-                >
-                  {disp}
-                </button>
-              ))}
+              <button
+                onClick={() => setDisposition('Interested')}
+                className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${
+                  disposition === 'Interested'
+                    ? 'border-green-600 bg-green-50 text-green-700'
+                    : 'border-gray-300 hover:border-green-400'
+                }`}
+              >
+                ✓ Interested
+              </button>
+              <button
+                onClick={() => setDisposition('Not interested')}
+                className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${
+                  disposition === 'Not interested'
+                    ? 'border-gray-600 bg-gray-50 text-gray-700'
+                    : 'border-gray-300 hover:border-gray-400'
+                }`}
+              >
+                ✗ Not Interested
+              </button>
+              <button
+                onClick={() => setDisposition('Not reachable')}
+                className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${
+                  disposition === 'Not reachable'
+                    ? 'border-yellow-600 bg-yellow-50 text-yellow-700'
+                    : 'border-gray-300 hover:border-yellow-400'
+                }`}
+              >
+                📵 Not Reachable
+              </button>
+              <button
+                onClick={() => setDisposition('Callback')}
+                className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${
+                  disposition === 'Callback'
+                    ? 'border-purple-600 bg-purple-50 text-purple-700'
+                    : 'border-gray-300 hover:border-purple-400'
+                }`}
+              >
+                🔄 Callback
+              </button>
             </div>
           </div>
           
@@ -145,18 +163,18 @@ export default function LeadDetail({ lead, onClose, onContact }) {
           )}
           
           <div className="mb-4">
-            <label className="block text-sm font-semibold mb-1">Notes</label>
+            <label className="block text-sm font-semibold mb-2">Notes (will show in lead list)</label>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Add any notes about the conversation..."
-              className="w-full px-3 py-2 border rounded"
+              placeholder="Add notes about the conversation..."
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               rows={3}
             />
           </div>
           
           <button
-            onClick={() => handleContact('phone')}
+            onClick={handleSave}
             disabled={!disposition}
             className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
           >

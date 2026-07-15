@@ -3,18 +3,25 @@ import { useState } from 'react';
 export default function LeadList({ leads, onSelectLead, slaMinutes }) {
   const [filter, setFilter] = useState('all');
   
-  const getLeadUrgency = (lead) => {
-    if (lead.first_contacted_at) return 'contacted';
-    if (lead.age_minutes > slaMinutes) return 'overdue';
-    if (lead.age_minutes > slaMinutes * 0.7) return 'warning';
-    return 'new';
-  };
+  const filteredLeads = leads.filter(l => {
+    if (filter === 'pending') return !l.first_contacted_at;
+    if (filter === 'interested') return l.status === 'Interested';
+    if (filter === 'not-interested') return l.status === 'Not interested';
+    if (filter === 'not-reachable') return l.status === 'Not reachable' || l.status === 'Wrong number';
+    if (filter === 'callback') return l.status === 'Callback';
+    return true;
+  });
   
-  const urgencyColors = {
-    overdue: 'bg-red-50 border-red-300',
-    warning: 'bg-yellow-50 border-yellow-300',
-    new: 'bg-blue-50 border-blue-300',
-    contacted: 'bg-white border-gray-200'
+  const formatDate = (dateStr) => {
+    const date = new Date(dateStr);
+    return date.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   };
   
   const filteredLeads = leads.filter(l => {
@@ -67,34 +74,41 @@ export default function LeadList({ leads, onSelectLead, slaMinutes }) {
         </button>
       </div>
       
-      <div className="space-y-2">
+      <div className="space-y-3">
         {filteredLeads.map(lead => {
-          const urgency = getLeadUrgency(lead);
           return (
             <div
               key={lead.id}
               onClick={() => onSelectLead(lead)}
-              className={`p-3 rounded border-2 cursor-pointer hover:shadow-md transition ${urgencyColors[urgency]}`}
+              className="p-4 rounded-lg border-2 border-gray-200 cursor-pointer hover:shadow-lg hover:border-blue-400 transition bg-white"
             >
-              <div className="flex justify-between items-start">
-                <div>
-                  <div className="font-semibold">{lead.name}</div>
+              <div className="flex justify-between items-start mb-2">
+                <div className="flex-1">
+                  <div className="font-semibold text-lg">{lead.name}</div>
                   <div className="text-sm text-gray-600">{lead.phone}</div>
                   <div className="text-sm text-gray-500">{lead.course_interest}</div>
                 </div>
-                <div className="text-right text-xs">
-                  <div className="text-gray-500">
-                    {Math.floor(lead.age_minutes / 60)}h {Math.floor(lead.age_minutes % 60)}m ago
-                  </div>
-                  {urgency === 'overdue' && (
-                    <div className="text-red-600 font-semibold mt-1">⚠ SLA breach</div>
-                  )}
-                  {lead.not_reachable_count > 0 && (
-                    <div className="text-orange-600 mt-1">
-                      {lead.not_reachable_count}× not reachable
-                    </div>
-                  )}
+                <div className="text-right">
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                    lead.status === 'Interested' ? 'bg-green-100 text-green-800' :
+                    lead.status === 'Not interested' ? 'bg-gray-100 text-gray-800' :
+                    lead.status === 'Not reachable' || lead.status === 'Wrong number' ? 'bg-yellow-100 text-yellow-800' :
+                    lead.status === 'Callback' ? 'bg-purple-100 text-purple-800' :
+                    'bg-blue-100 text-blue-800'
+                  }`}>
+                    {lead.status}
+                  </span>
                 </div>
+              </div>
+              
+              {lead.last_note && (
+                <div className="mt-2 p-2 bg-gray-50 rounded text-sm text-gray-700 italic">
+                  💬 {lead.last_note}
+                </div>
+              )}
+              
+              <div className="mt-2 text-xs text-gray-500">
+                📅 Created: {formatDate(lead.created_at)}
               </div>
             </div>
           );
