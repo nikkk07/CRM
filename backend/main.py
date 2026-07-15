@@ -43,14 +43,37 @@ app.add_middleware(
         "http://localhost:3000"
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 @app.get("/health")
 async def health_check():
     """Health endpoint for uptime monitoring - no auth, no DB query"""
     return {"status": "ok"}
+
+@app.post("/api/seed-admin")
+async def seed_admin():
+    """One-off endpoint to create initial admin user in empty DB"""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM employee WHERE role = 'owner'")
+        if cur.fetchone()[0] > 0:
+            raise HTTPException(status_code=400, detail="Admin already exists")
+        
+        hashed = hash_password("admin")
+        cur.execute("""
+            INSERT INTO employee (
+                id, name, phone, email, role, department, permission_level,
+                password_hash, date_of_joining, is_active
+            ) VALUES (
+                'EMP001', 'Admin', 'admin', 'admin@weoneaviation.in',
+                'owner', 'Admin', 'full_access', %s, CURRENT_DATE, true
+            )
+        """, (hashed,))
+        conn.commit()
+        return {"status": "admin created", "phone": "admin", "password": "admin"}
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 async def login(req: LoginRequest):
