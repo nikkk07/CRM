@@ -19,11 +19,11 @@ with get_db() as conn:
     hashed = hash_password(ADMIN_PASSWORD)
     cur.execute("""
         INSERT INTO employee (
-            id, name, phone, email, role, department, permission_level,
-            password_hash, date_of_joining, is_active
+            name, phone, email, role, department, permission_level,
+            password_hash
         ) VALUES (
-            'EMP001', 'Admin', %s, 'admin@weoneaviation.in',
-            'owner', 'Admin', 'full_access', %s, CURRENT_DATE, true
+            'Admin', %s, 'admin@weoneaviation.in',
+            'owner', 'Admin', 'full_access', %s
         )
     """, (ADMIN_PHONE, hashed))
     conn.commit()
