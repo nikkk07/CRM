@@ -74,6 +74,14 @@ def get_watermark():
     """Get last import watermark"""
     with get_db() as conn:
         cur = conn.cursor()
+        
+        # Initialize watermark table if needed
+        cur.execute("""
+            INSERT INTO mongo_import_watermark (collection_name, last_imported_at, last_imported_id)
+            VALUES ('website_leads', NULL, NULL)
+            ON CONFLICT (collection_name) DO NOTHING
+        """)
+        
         cur.execute("""
             SELECT last_imported_at, last_imported_id
             FROM mongo_import_watermark

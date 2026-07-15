@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_URL } from '../api';
 
 export default function QuoteGenerator({ lead, onClose }) {
   const [courses, setCourses] = useState([]);
@@ -14,7 +15,7 @@ export default function QuoteGenerator({ lead, onClose }) {
 
   const loadCourses = async () => {
     const token = localStorage.getItem('token');
-    const res = await fetch('http://localhost:8000/api/courses', {
+    const res = await fetch(`${API_URL}/api/courses`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await res.json();
@@ -37,7 +38,7 @@ export default function QuoteGenerator({ lead, onClose }) {
     const token = localStorage.getItem('token');
     
     if (discount > 0) {
-      await fetch(`http://localhost:8000/api/courses/${selectedCourse}/discount`, {
+      await fetch(`${API_URL}/api/courses/${selectedCourse}/discount`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -48,7 +49,7 @@ export default function QuoteGenerator({ lead, onClose }) {
     }
 
     if (installments !== selectedCourseData?.installment_count) {
-      await fetch(`http://localhost:8000/api/courses/${selectedCourse}/installments`, {
+      await fetch(`${API_URL}/api/courses/${selectedCourse}/installments`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -59,7 +60,7 @@ export default function QuoteGenerator({ lead, onClose }) {
     }
 
     setLoading(true);
-    const res = await fetch('http://localhost:8000/api/quotes/generate', {
+    const res = await fetch(`${API_URL}/api/quotes/generate`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,

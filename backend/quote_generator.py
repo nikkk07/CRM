@@ -154,8 +154,8 @@ def generate_quote_html(lead_name, course, quote_id):
     '''
     return html
 
-def generate_quote_pdf(lead_name, course_id, quote_id, output_path):
+def generate_quote_pdf(lead_name, course_id, quote_id) -> bytes:
+    """Generate PDF and return bytes (no file write for Render ephemeral filesystem)"""
     course = get_course_details(course_id)
     html_content = generate_quote_html(lead_name, course, quote_id)
-    HTML(string=html_content).write_pdf(output_path)
-    return output_path
+    return HTML(string=html_content).write_pdf()

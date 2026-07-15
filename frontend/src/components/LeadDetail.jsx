@@ -16,7 +16,6 @@ export default function LeadDetail({ lead, onClose, onContact }) {
   const [followupDate, setFollowupDate] = useState('');
   const [followupReason, setFollowupReason] = useState('');
   const [showQuoteGen, setShowQuoteGen] = useState(false);
-  const [generatingOpener, setGeneratingOpener] = useState(false);
   
   const handleContact = async (channel) => {
     if (!disposition) {
@@ -41,30 +40,6 @@ export default function LeadDetail({ lead, onClose, onContact }) {
     setDisposition('');
     setNote('');
     onClose();
-  };
-
-  const handleGenerateOpener = async () => {
-    setGeneratingOpener(true);
-    const token = localStorage.getItem('token');
-    
-    try {
-      const res = await fetch('http://localhost:8000/api/ai/lead-opener', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ lead_id: lead.id })
-      });
-      
-      const data = await res.json();
-      alert(`Draft created in Outbox:\n\n${data.draft_message}`);
-    } catch (err) {
-      console.error('Opener generation error:', err);
-      alert('Failed to generate opener. Please try again.');
-    } finally {
-      setGeneratingOpener(false);
-    }
   };
   
   const waLink = `https://wa.me/${lead.phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hello ' + lead.name + ', this is We One Aviation regarding your enquiry.')}`;
@@ -104,16 +79,9 @@ export default function LeadDetail({ lead, onClose, onContact }) {
           <div className="mb-4">
             <button
               onClick={() => setShowQuoteGen(true)}
-              className="w-full bg-purple-600 text-white py-2 rounded mb-2 hover:bg-purple-700"
+              className="w-full bg-purple-600 text-white py-2 rounded hover:bg-purple-700"
             >
               📄 Generate Quote
-            </button>
-            <button
-              onClick={handleGenerateOpener}
-              disabled={generatingOpener}
-              className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:bg-gray-400"
-            >
-              {generatingOpener ? '🤖 Generating...' : '🤖 AI Draft Opener'}
             </button>
           </div>
           

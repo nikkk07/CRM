@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { formatDate } from '../utils/formatters';
 import { showToast } from '../utils/toast';
 import LoadingSpinner from './LoadingSpinner';
+import { API_URL } from '../api';
 
 export default function TaskBoard() {
   const [employees, setEmployees] = useState([]);
@@ -37,7 +38,7 @@ export default function TaskBoard() {
       const token = localStorage.getItem('token');
       
       // Fetch tasks (backend already filters for employee sessions)
-      const tasksRes = await fetch('http://localhost:8000/api/tasks', {
+      const tasksRes = await fetch(`${API_URL}/api/tasks`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const tasksData = await tasksRes.json();
@@ -46,7 +47,7 @@ export default function TaskBoard() {
       // Fetch employees based on permission_level
       if (canViewAllEmployees) {
         try {
-          const empRes = await fetch('http://localhost:8000/api/employees', {
+          const empRes = await fetch(`${API_URL}/api/employees`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           if (empRes.ok) {
@@ -84,7 +85,7 @@ export default function TaskBoard() {
     e.preventDefault();
     try {
       const token = localStorage.getItem('token');
-      await fetch('http://localhost:8000/api/tasks', {
+      await fetch(`${API_URL}/api/tasks`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -113,7 +114,7 @@ export default function TaskBoard() {
         payload.abort_reason = reason;
       }
       
-      await fetch(`http://localhost:8000/api/tasks/${taskId}`, {
+      await fetch(`${API_URL}/api/tasks/${taskId}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,

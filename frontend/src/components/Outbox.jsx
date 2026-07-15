@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_URL } from '../api';
 
 export default function Outbox({ onClose }) {
   const [messages, setMessages] = useState([]);
@@ -9,7 +10,7 @@ export default function Outbox({ onClose }) {
 
   const loadMessages = async () => {
     const token = localStorage.getItem('token');
-    const res = await fetch('http://localhost:8000/api/outbox', {
+    const res = await fetch(`${API_URL}/api/outbox`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await res.json();
@@ -18,7 +19,7 @@ export default function Outbox({ onClose }) {
 
   const handleApprove = async (msgId) => {
     const token = localStorage.getItem('token');
-    await fetch(`http://localhost:8000/api/outbox/${msgId}/approve`, {
+    await fetch(`${API_URL}/api/outbox/${msgId}/approve`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -28,7 +29,7 @@ export default function Outbox({ onClose }) {
   const handleMarkSent = async (msgId) => {
     if (!confirm('Mark this quote as sent?')) return;
     const token = localStorage.getItem('token');
-    await fetch(`http://localhost:8000/api/outbox/${msgId}/sent`, {
+    await fetch(`${API_URL}/api/outbox/${msgId}/sent`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -36,7 +37,7 @@ export default function Outbox({ onClose }) {
   };
 
   const getWhatsAppLink = (msg) => {
-    const pdfUrl = `https://weoneaviation.in/quotes/${msg.pdf_path.split('/').pop()}`;
+    const pdfUrl = `${API_URL}/api/quotes/${msg.id}/pdf`;
     const text = `Hi ${msg.lead_name},\n\nPlease find your course quote here: ${pdfUrl}\n\nFor any queries, contact us.\n\n- We One Aviation`;
     const phone = msg.lead_phone.replace(/\D/g, '');
     const phoneWith91 = phone.startsWith('91') ? phone : `91${phone}`;
@@ -83,7 +84,7 @@ export default function Outbox({ onClose }) {
               {msg.pdf_path && (
                 <div className="mb-3 p-2 bg-gray-50 rounded">
                   <a
-                    href={`http://localhost:8000${msg.pdf_path}`}
+                    href={`${API_URL}/api/quotes/${msg.id}/pdf`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline text-sm font-semibold"

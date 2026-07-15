@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { formatDate } from '../utils/formatters';
 import { showToast } from '../utils/toast';
 import LoadingSpinner from './LoadingSpinner';
+import { API_URL } from '../api';
 
 export default function LeaveCalendar({ employeeId }) {
   const [employeeDetail, setEmployeeDetail] = useState(null);
@@ -16,7 +17,7 @@ export default function LeaveCalendar({ employeeId }) {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:8000/api/employees/${employeeId}`, {
+      const res = await fetch(`${API_URL}/api/employees/${employeeId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -32,7 +33,7 @@ export default function LeaveCalendar({ employeeId }) {
   const markLeaveDay = async (date, type) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:8000/api/employees/${employeeId}/leave`, {
+      const res = await fetch(`${API_URL}/api/employees/${employeeId}/leave`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -57,7 +58,7 @@ export default function LeaveCalendar({ employeeId }) {
   const unmarkLeaveDay = async (date) => {
     try {
       const token = localStorage.getItem('token');
-      await fetch(`http://localhost:8000/api/employees/${employeeId}/leave/${date}`, {
+      await fetch(`${API_URL}/api/employees/${employeeId}/leave/${date}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });

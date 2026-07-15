@@ -9,8 +9,7 @@ import EmployeeDirectory from './components/EmployeeDirectory';
 import MyProfile from './components/MyProfile';
 import LeaveCalendar from './components/LeaveCalendar';
 import PolicyDocs from './components/PolicyDocs';
-import PolicyQA from './components/PolicyQA';
-import { syncData } from './api';
+import { syncData, API_URL } from './api';
 
 export default function App() {
   const [employee, setEmployee] = useState(null);
@@ -20,7 +19,6 @@ export default function App() {
   const [followups, setFollowups] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
   const [showOutbox, setShowOutbox] = useState(false);
-  const [showPolicyQA, setShowPolicyQA] = useState(false);
   const [activeTab, setActiveTab] = useState('leads');
   const [slaMinutes, setSlaMinutes] = useState(15);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -65,14 +63,14 @@ export default function App() {
       const shouldFetchLeads = !isEmployeeSession || canAccessLeads;
       
       if (shouldFetchLeads) {
-        const leadsRes = await fetch('http://localhost:8000/api/leads', {
+        const leadsRes = await fetch(`${API_URL}/api/leads`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (leadsRes.ok) {
           const leadsData = await leadsRes.json();
           setLeads(leadsData);
           
-          const followupsRes = await fetch('http://localhost:8000/api/followups/pending', {
+          const followupsRes = await fetch(`${API_URL}/api/followups/pending`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           if (followupsRes.ok) {
@@ -99,7 +97,7 @@ export default function App() {
     const token = localStorage.getItem('token');
     
     if (data.followup) {
-      await fetch(`http://localhost:8000/api/leads/${leadId}/followup`, {
+      await fetch(`${API_URL}/api/leads/${leadId}/followup`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -111,7 +109,7 @@ export default function App() {
         })
       });
     } else {
-      await fetch(`http://localhost:8000/api/leads/${leadId}/contact`, {
+      await fetch(`${API_URL}/api/leads/${leadId}/contact`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -146,7 +144,7 @@ export default function App() {
     
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:8000/api/auth/change-password', {
+      const res = await fetch(`${API_URL}/api/auth/change-password`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -185,20 +183,12 @@ export default function App() {
         <h1 className="text-xl font-bold">We One CRM</h1>
         <div className="flex items-center gap-4">
           {canAccessLeads && (
-            <>
-              <button
-                onClick={() => setShowPolicyQA(true)}
-                className="px-3 py-1 bg-green-500 rounded hover:bg-green-600"
-              >
-                🤖 Policy Q&A
-              </button>
-              <button
-                onClick={() => setShowOutbox(true)}
-                className="px-3 py-1 bg-purple-500 rounded hover:bg-purple-600"
-              >
-                📤 Outbox
-              </button>
-            </>
+            <button
+              onClick={() => setShowOutbox(true)}
+              className="px-3 py-1 bg-purple-500 rounded hover:bg-purple-600"
+            >
+              📤 Outbox
+            </button>
           )}
           <span className="text-sm">{employee.name}</span>
           <button
@@ -361,10 +351,6 @@ export default function App() {
 
       {showOutbox && (
         <Outbox onClose={() => setShowOutbox(false)} />
-      )}
-
-      {showPolicyQA && (
-        <PolicyQA onClose={() => setShowPolicyQA(false)} />
       )}
 
       {/* Change Password Modal */}

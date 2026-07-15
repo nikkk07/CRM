@@ -3,6 +3,7 @@ import { formatDate, formatPhone } from '../utils/formatters';
 import LoadingSpinner from './LoadingSpinner';
 import EmptyState from './EmptyState';
 import { showToast } from '../utils/toast';
+import { API_URL } from '../api';
 
 export default function EmployeeDirectory() {
   const [employees, setEmployees] = useState([]);
@@ -22,7 +23,7 @@ export default function EmployeeDirectory() {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:8000/api/employees', {
+      const res = await fetch(`${API_URL}/api/employees`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -36,7 +37,7 @@ export default function EmployeeDirectory() {
   const loadEmployeeDetail = async (id) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:8000/api/employees/${id}`, {
+      const res = await fetch(`${API_URL}/api/employees/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -51,8 +52,8 @@ export default function EmployeeDirectory() {
     try {
       const token = localStorage.getItem('token');
       const url = formData.id 
-        ? `http://localhost:8000/api/employees/${formData.id}`
-        : 'http://localhost:8000/api/employees';
+        ? `${API_URL}/api/employees/${formData.id}`
+        : `${API_URL}/api/employees`;
       
       await fetch(url, {
         method: formData.id ? 'PATCH' : 'POST',
@@ -75,7 +76,7 @@ export default function EmployeeDirectory() {
   const markLeaveDay = async (date, type) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:8000/api/employees/${selectedEmployee.id}/leave`, {
+      const res = await fetch(`${API_URL}/api/employees/${selectedEmployee.id}/leave`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -100,7 +101,7 @@ export default function EmployeeDirectory() {
   const unmarkLeaveDay = async (date) => {
     try {
       const token = localStorage.getItem('token');
-      await fetch(`http://localhost:8000/api/employees/${selectedEmployee.id}/leave/${date}`, {
+      await fetch(`${API_URL}/api/employees/${selectedEmployee.id}/leave/${date}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });

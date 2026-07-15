@@ -9,9 +9,6 @@ from schemas import LoginRequest, TokenResponse, EmployeeCreate
 from lead_ingestion import ingest_lead
 from sla_monitor import start_sla_monitor
 from quote_generator import generate_quote_pdf
-from agent_policy_qa import policy_qa
-from agent_lead_opener import generate_lead_opener
-from llm_provider import get_llm_provider
 from encryption import encrypt_value, decrypt_value
 from mongo_bridge import start_mongo_bridge
 import json
@@ -39,15 +36,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://crm-three-smoky-26.vercel.app",
+        "http://localhost:3000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/health")
+async def health_check():
+    """Health endpoint for uptime monitoring - no auth, no DB query"""
+    return {"status": "ok"}
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 async def login(req: LoginRequest):
@@ -387,17 +390,15 @@ async def generate_quote(data: dict, current_emp = Depends(get_current_employee)
         course_name = row[0]
         
         quote_id = str(uuid.uuid4())[:8].upper()
-        filename = f"quote_{quote_id}.pdf"
-        filepath = os.path.join("static", "quotes", filename)
         
-        generate_quote_pdf(lead_name, course_id, quote_id, filepath)
+        # Generate PDF bytes (no file write)
+        pdf_bytes = generate_quote_pdf(lead_name, course_id, quote_id)
         
-        pdf_url = f"/static/quotes/{filename}"
-        
+        # Store PDF in database
         cur.execute(
-            """INSERT INTO outbox_message (lead_id, type, body, pdf_path, status)
+            """INSERT INTO outbox_message (lead_id, type, body, pdf_bytes, status)
                VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-            (lead_id, 'quote', f'Quote for {course_name}', pdf_url, 'pending')
+            (lead_id, 'quote', f'Quote for {course_name}', pdf_bytes, 'pending')
         )
         outbox_id = cur.fetchone()[0]
         
@@ -409,7 +410,26 @@ async def generate_quote(data: dict, current_emp = Depends(get_current_employee)
             }))
         )
         
-    return {"id": str(outbox_id), "pdf_url": pdf_url, "quote_id": quote_id}
+    return {"id": str(outbox_id), "quote_id": quote_id}
+
+@app.get("/api/quotes/{outbox_id}/pdf")
+async def get_quote_pdf(outbox_id: str, current_emp = Depends(get_current_employee)):
+    """Serve PDF from database"""
+    from fastapi.responses import Response
+    
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT pdf_bytes FROM outbox_message WHERE id = %s", (outbox_id,))
+        row = cur.fetchone()
+        
+        if not row or not row[0]:
+            raise HTTPException(status_code=404, detail="PDF not found")
+        
+        return Response(
+            content=bytes(row[0]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=quote_{outbox_id}.pdf"}
+        )
 
 @app.get("/api/outbox")
 async def get_outbox(current_emp = Depends(get_current_employee)):
@@ -426,7 +446,7 @@ async def get_outbox(current_emp = Depends(get_current_employee)):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT o.id, o.lead_id, o.type, o.body, o.pdf_path, o.status, o.created_at,
+            SELECT o.id, o.lead_id, o.type, o.body, o.status, o.created_at,
                    l.name, l.phone
             FROM outbox_message o
             JOIN lead l ON o.lead_id = l.id
@@ -437,8 +457,9 @@ async def get_outbox(current_emp = Depends(get_current_employee)):
         for r in cur.fetchall():
             messages.append({
                 "id": str(r[0]), "lead_id": str(r[1]), "type": r[2], "body": r[3],
-                "pdf_path": r[4], "status": r[5], "created_at": r[6].isoformat(),
-                "lead_name": r[7], "lead_phone": r[8]
+                "status": r[4], "created_at": r[5].isoformat(),
+                "lead_name": r[6], "lead_phone": r[7],
+                "pdf_url": f"/api/quotes/{r[0]}/pdf" if r[2] == 'quote' else None
             })
     return messages
 
@@ -1251,16 +1272,12 @@ async def create_policy_doc(data: dict, current_emp = Depends(get_current_employ
     title = data.get('title')
     content = data.get('content')
     
-    # Generate embedding using local Ollama
-    provider = get_llm_provider(contains_pii=True)
-    embedding = provider.embed(content)
-    
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO policy_doc (title, content, embedding, created_by)
-               VALUES (%s, %s, %s::vector, %s) RETURNING id""",
-            (title, content, embedding, current_emp['id'])
+            """INSERT INTO policy_doc (title, content, created_by)
+               VALUES (%s, %s, %s) RETURNING id""",
+            (title, content, current_emp['id'])
         )
         doc_id = cur.fetchone()[0]
     
@@ -1271,43 +1288,35 @@ async def upload_policy_doc(file: UploadFile = File(...), current_emp = Depends(
     content = (await file.read()).decode('utf-8')
     title = file.filename
     
-    # Generate embedding using local Ollama
-    provider = get_llm_provider(contains_pii=True)
-    embedding = provider.embed(content)
-    
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO policy_doc (title, content, embedding, created_by)
-               VALUES (%s, %s, %s::vector, %s) RETURNING id""",
-            (title, content, embedding, current_emp['id'])
+            """INSERT INTO policy_doc (title, content, created_by)
+               VALUES (%s, %s, %s) RETURNING id""",
+            (title, content, current_emp['id'])
         )
         doc_id = cur.fetchone()[0]
     
     return {"id": str(doc_id), "title": title}
 
-@app.post("/api/ai/policy-qa")
-async def ai_policy_qa(data: dict, current_emp = Depends(get_current_employee)):
-    question = data.get('question')
-    if not question:
-        raise HTTPException(status_code=400, detail="Question required")
-    
-    result = policy_qa(question, current_emp['id'])
-    return result
-
-@app.post("/api/ai/lead-opener")
-async def ai_lead_opener(data: dict, current_emp = Depends(get_current_employee)):
-    lead_id = data.get('lead_id')
-    if not lead_id:
-        raise HTTPException(status_code=400, detail="Lead ID required")
-    
-    result = generate_lead_opener(lead_id, current_emp['id'])
-    
-    if 'error' in result:
-        raise HTTPException(status_code=404, detail=result['error'])
-    
-    return result
+@app.get("/api/policy-docs/search")
+async def search_policy_docs(q: str, current_emp = Depends(get_current_employee)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, title, content, created_at 
+            FROM policy_doc 
+            WHERE title ILIKE %s OR content ILIKE %s
+            ORDER BY created_at DESC
+        """, (f'%{q}%', f'%{q}%'))
+        docs = []
+        for r in cur.fetchall():
+            docs.append({
+                "id": str(r[0]), "title": r[1], "content": r[2][:300], "created_at": r[3].isoformat()
+            })
+    return docs
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

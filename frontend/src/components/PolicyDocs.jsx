@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { API_URL } from '../api';
 
 export default function PolicyDocs() {
   const [docs, setDocs] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ title: '', content: '' });
   const [uploading, setUploading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     loadDocs();
@@ -12,7 +14,20 @@ export default function PolicyDocs() {
 
   const loadDocs = async () => {
     const token = localStorage.getItem('token');
-    const res = await fetch('http://localhost:8000/api/policy-docs', {
+    const res = await fetch(`${API_URL}/api/policy-docs`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    setDocs(data);
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      loadDocs();
+      return;
+    }
+    const token = localStorage.getItem('token');
+    const res = await fetch(`${API_URL}/api/policy-docs/search?q=${encodeURIComponent(searchQuery)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await res.json();
@@ -22,7 +37,7 @@ export default function PolicyDocs() {
   const handleCreate = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem('token');
-    await fetch('http://localhost:8000/api/policy-docs', {
+    await fetch(`${API_URL}/api/policy-docs`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -44,7 +59,7 @@ export default function PolicyDocs() {
     const formData = new FormData();
     formData.append('file', file);
     
-    await fetch('http://localhost:8000/api/policy-docs/upload', {
+    await fetch(`${API_URL}/api/policy-docs/upload`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
       body: formData
@@ -70,6 +85,29 @@ export default function PolicyDocs() {
             + Add
           </button>
         </div>
+      </div>
+
+      <div className="mb-4 flex gap-2">
+        <input
+          type="text"
+          placeholder="Search documents..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+          className="flex-1 px-3 py-2 border rounded"
+        />
+        <button
+          onClick={handleSearch}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
+          Search
+        </button>
+        <button
+          onClick={() => { setSearchQuery(''); loadDocs(); }}
+          className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+        >
+          Clear
+        </button>
       </div>
 
       {showForm && (

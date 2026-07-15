@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { showToast } from '../utils/toast';
+import { API_URL } from '../api';
 
 export default function EmployeeLogin({ onLogin }) {
   const [identifier, setIdentifier] = useState('');
@@ -11,7 +12,7 @@ export default function EmployeeLogin({ onLogin }) {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8000/api/auth/employee-login', {
+      const res = await fetch(`${API_URL}/api/auth/employee-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier, pin })

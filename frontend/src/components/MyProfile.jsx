@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { formatDate } from '../utils/formatters';
 import LoadingSpinner from './LoadingSpinner';
+import { API_URL } from '../api';
 
 export default function MyProfile() {
   const [profile, setProfile] = useState(null);
@@ -23,7 +24,7 @@ export default function MyProfile() {
       const token = localStorage.getItem('token');
       const employee = JSON.parse(localStorage.getItem('employee'));
       
-      const res = await fetch(`http://localhost:8000/api/employees/${employee.id}`, {
+      const res = await fetch(`${API_URL}/api/employees/${employee.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -50,7 +51,7 @@ export default function MyProfile() {
     
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:8000/api/auth/change-password', {
+      const res = await fetch(`${API_URL}/api/auth/change-password`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
