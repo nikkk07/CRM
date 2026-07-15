@@ -277,7 +277,13 @@ async def log_contact(lead_id: str, data: dict, current_emp = Depends(get_curren
         cur.execute("UPDATE lead SET first_contacted_at = COALESCE(first_contacted_at, NOW()), status = %s, last_note = %s WHERE id = %s", 
                     (disposition, note, lead_id))
         
-        # Insert into respective disposition table
+        # FIRST: Remove lead from ALL disposition tables to avoid duplicates
+        cur.execute("DELETE FROM interested WHERE lead_id = %s", (lead_id,))
+        cur.execute("DELETE FROM not_interested WHERE lead_id = %s", (lead_id,))
+        cur.execute("DELETE FROM not_reachable WHERE lead_id = %s", (lead_id,))
+        cur.execute("DELETE FROM callback WHERE lead_id = %s", (lead_id,))
+        
+        # THEN: Insert into the correct disposition table only
         if disposition == 'Interested':
             cur.execute("""
                 INSERT INTO interested (lead_id, name, phone, email, course_interest, address, note, marked_by)
