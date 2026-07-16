@@ -3,23 +3,37 @@ import QuoteGenerator from './QuoteGenerator';
 
 export default function LeadDetail({ lead, onClose, onContact }) {
   const [disposition, setDisposition] = useState('');
+  const [closureOutcome, setClosureOutcome] = useState('');
   const [note, setNote] = useState('');
   const [followupDate, setFollowupDate] = useState('');
   const [followupReason, setFollowupReason] = useState('');
   const [showQuoteGen, setShowQuoteGen] = useState(false);
-  
+
   const handleSave = async () => {
     if (!disposition) {
       alert('Select a disposition first');
       return;
     }
-    
+
+    if (disposition === 'Closed') {
+      if (!closureOutcome) {
+        alert('Select Admission Completed or Admission Aborted');
+        return;
+      }
+      await onContact(lead.id, { closure_outcome: closureOutcome, note });
+      setDisposition('');
+      setClosureOutcome('');
+      setNote('');
+      onClose();
+      return;
+    }
+
     await onContact(lead.id, {
       channel: 'phone',
       disposition,
       note
     });
-    
+
     if (disposition === 'Callback' && followupDate) {
       await onContact(lead.id, {
         followup: true,
@@ -27,7 +41,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
         reason: followupReason
       });
     }
-    
+
     setDisposition('');
     setNote('');
     onClose();
@@ -139,9 +153,47 @@ export default function LeadDetail({ lead, onClose, onContact }) {
               >
                 🔄 Callback
               </button>
+              <button
+                onClick={() => { setDisposition('Closed'); setClosureOutcome(''); }}
+                className={`py-3 px-3 rounded-lg border-2 transition font-semibold col-span-2 ${
+                  disposition === 'Closed'
+                    ? 'border-slate-800 bg-slate-50 text-slate-800'
+                    : 'border-gray-300 hover:border-slate-500'
+                }`}
+              >
+                🔒 Closed
+              </button>
             </div>
           </div>
-          
+
+          {disposition === 'Closed' && (
+            <div className="mb-4 p-3 bg-slate-50 rounded">
+              <label className="block text-sm font-semibold mb-2">Closure Outcome *</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setClosureOutcome('admission_completed')}
+                  className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${
+                    closureOutcome === 'admission_completed'
+                      ? 'border-green-600 bg-green-50 text-green-700'
+                      : 'border-gray-300 hover:border-green-400'
+                  }`}
+                >
+                  ✓ Admission Completed
+                </button>
+                <button
+                  onClick={() => setClosureOutcome('admission_aborted')}
+                  className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${
+                    closureOutcome === 'admission_aborted'
+                      ? 'border-red-600 bg-red-50 text-red-700'
+                      : 'border-gray-300 hover:border-red-400'
+                  }`}
+                >
+                  ✗ Admission Aborted
+                </button>
+              </div>
+            </div>
+          )}
+
           {disposition === 'Callback' && (
             <div className="mb-4 p-3 bg-yellow-50 rounded">
               <label className="block text-sm font-semibold mb-1">Follow-up Date</label>

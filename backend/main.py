@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from database import get_db
 from auth import authenticate_employee, create_access_token, get_current_employee, hash_password
 from schemas import LoginRequest, TokenResponse, EmployeeCreate
-from lead_ingestion import ingest_lead
+from lead_ingestion import ingest_lead, normalize_phone
 from sla_monitor import start_sla_monitor
 from quote_generator import generate_quote_pdf
 from encryption import encrypt_value, decrypt_value
@@ -200,12 +200,13 @@ async def get_leads(current_emp = Depends(get_current_employee)):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT l.id, l.name, l.phone, l.email, l.address, l.course_interest, 
+            SELECT l.id, l.name, l.phone, l.email, l.address, l.course_interest,
                    l.utm_source, l.utm_medium, l.utm_campaign, l.status, l.assigned_to,
                    l.created_at, l.first_contacted_at, l.dedup_key, l.last_note,
                    COALESCE(l.parked, FALSE) as parked, COALESCE(l.closed, FALSE) as closed,
                    (SELECT COUNT(*) FROM contact_attempt WHERE lead_id = l.id AND disposition = 'Not reachable') as not_reachable_count,
-                   EXTRACT(EPOCH FROM (NOW() - l.created_at))/60 as age_minutes
+                   EXTRACT(EPOCH FROM (NOW() - l.created_at))/60 as age_minutes,
+                   l.closure_outcome, l.guardian_name, l.qualifications, l.is_eligible, l.nios_interested
             FROM lead l
             ORDER BY l.created_at DESC
         """)
@@ -217,7 +218,9 @@ async def get_leads(current_emp = Depends(get_current_employee)):
                 "status": r[9] or "new", "assigned_to": str(r[10]) if r[10] else None,
                 "created_at": r[11].isoformat(), "first_contacted_at": r[12].isoformat() if r[12] else None,
                 "dedup_key": r[13], "last_note": r[14], "parked": r[15], "closed": r[16],
-                "not_reachable_count": r[17], "age_minutes": float(r[18])
+                "not_reachable_count": r[17], "age_minutes": float(r[18]),
+                "closure_outcome": r[19], "guardian_name": r[20], "qualifications": r[21] or [],
+                "is_eligible": r[22], "nios_interested": r[23]
             })
     return leads
 
@@ -277,6 +280,90 @@ async def log_contact(lead_id: str, data: dict, current_emp = Depends(get_curren
         )
         
     return {"id": str(attempt_id)}
+
+@app.post("/api/leads/{lead_id}/close")
+async def close_lead(lead_id: str, data: dict, current_emp = Depends(get_current_employee)):
+    if current_emp['department'] not in ['Admin', 'Sales']:
+        raise HTTPException(status_code=403, detail="Lead access requires Admin or Sales department")
+
+    outcome = data.get('closure_outcome')
+    if outcome not in ('admission_completed', 'admission_aborted'):
+        raise HTTPException(status_code=400, detail="closure_outcome must be admission_completed or admission_aborted")
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM lead WHERE id = %s", (lead_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        note = data.get('note')
+        # status is the top-level state; closure_outcome is the sub-state
+        cur.execute("""
+            UPDATE lead
+            SET status = 'closed', closed = TRUE, closure_outcome = %s,
+                first_contacted_at = COALESCE(first_contacted_at, NOW()),
+                last_note = COALESCE(%s, last_note)
+            WHERE id = %s
+        """, (outcome, note, lead_id))
+
+        cur.execute(
+            """INSERT INTO audit_log (actor, action, entity, payload)
+               VALUES (%s, %s, %s, %s)""",
+            (current_emp["id"], "close", "lead", json.dumps({"lead_id": lead_id, "closure_outcome": outcome}))
+        )
+    return {"status": "closed", "closure_outcome": outcome}
+
+@app.post("/api/leads/query")
+async def create_query(data: dict, current_emp = Depends(get_current_employee)):
+    """Manual lead entry (Add Query). Reuses the normalized-phone dedup used by the Mongo bridge."""
+    if current_emp['department'] not in ['Admin', 'Sales']:
+        raise HTTPException(status_code=403, detail="Lead access requires Admin or Sales department")
+
+    name = (data.get('name') or '').strip()
+    raw_phone = (data.get('phone') or '').strip()
+    course = data.get('course_interest')
+    if not name or not raw_phone or not course:
+        raise HTTPException(status_code=400, detail="Name, phone and course are required")
+
+    phone_normalized = normalize_phone(raw_phone)
+    qualifications = data.get('qualifications') or []
+
+    with get_db() as conn:
+        cur = conn.cursor()
+
+        # Dedup on normalized phone (same key the Mongo bridge uses)
+        cur.execute("SELECT id, name FROM lead WHERE dedup_key = %s", (phone_normalized,))
+        existing = cur.fetchone()
+        if existing:
+            return {"status": "duplicate", "lead_id": str(existing[0]), "name": existing[1]}
+
+        # Eligibility rule comes from config, not hardcoded
+        cur.execute("SELECT value FROM config WHERE key = 'eligibility_required_qualification'")
+        rule_row = cur.fetchone()
+        required_qual = rule_row[0] if rule_row else "12th with Physics & Maths"
+        is_eligible = required_qual in qualifications
+        nios_interested = data.get('nios_interested') if not is_eligible else None
+
+        cur.execute(
+            """INSERT INTO lead (name, phone, email, address, course_interest,
+                                 utm_source, utm_medium, utm_campaign, status, dedup_key,
+                                 guardian_name, qualifications, is_eligible, nios_interested)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'new', %s, %s, %s, %s, %s) RETURNING id""",
+            (name, phone_normalized, data.get('email'), data.get('address'), course,
+             data.get('utm_source'), 'manual', 'add_query', phone_normalized,
+             data.get('guardian_name'), json.dumps(qualifications), is_eligible, nios_interested)
+        )
+        lead_id = cur.fetchone()[0]
+
+        cur.execute(
+            """INSERT INTO audit_log (actor, action, entity, payload)
+               VALUES (%s, %s, %s, %s)""",
+            (current_emp["id"], "create_query", "lead", json.dumps({
+                "lead_id": str(lead_id), "source": data.get('utm_source'),
+                "is_eligible": is_eligible, "nios_interested": nios_interested
+            }))
+        )
+    return {"status": "created", "lead_id": str(lead_id), "is_eligible": is_eligible}
 
 @app.post("/api/leads/{lead_id}/followup")
 async def create_followup(lead_id: str, data: dict, current_emp = Depends(get_current_employee)):
@@ -405,7 +492,8 @@ async def generate_quote(data: dict, current_emp = Depends(get_current_employee)
         cur.execute("SELECT name FROM course WHERE id = %s", (course_id,))
         row = cur.fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="Course not found")
+            # Only courses with fees configured in the course table can be quoted (currently CPL).
+            raise HTTPException(status_code=400, detail="No fee configured for this course. Add it in Course Config before generating a quote.")
         course_name = row[0]
         
         quote_id = str(uuid.uuid4())[:8].upper()

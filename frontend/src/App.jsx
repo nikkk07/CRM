@@ -9,6 +9,7 @@ import EmployeeDirectory from './components/EmployeeDirectory';
 import MyProfile from './components/MyProfile';
 import LeaveCalendar from './components/LeaveCalendar';
 import PolicyDocs from './components/PolicyDocs';
+import AddQuery from './components/AddQuery';
 import { syncData, API_URL } from './api';
 
 export default function App() {
@@ -19,6 +20,8 @@ export default function App() {
   const [followups, setFollowups] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
   const [showOutbox, setShowOutbox] = useState(false);
+  const [showAddQuery, setShowAddQuery] = useState(false);
+  const [config, setConfig] = useState({});
   const [activeTab, setActiveTab] = useState('leads');
   const [slaMinutes, setSlaMinutes] = useState(15);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -82,7 +85,8 @@ export default function App() {
       if (!isEmployeeSession) {
         const snapshot = await syncData(token);
         setLastSync(new Date(snapshot.synced_at));
-        
+        setConfig(snapshot.config || {});
+
         if (snapshot.config.sla_first_response_minutes) {
           setSlaMinutes(parseInt(snapshot.config.sla_first_response_minutes));
         }
@@ -94,7 +98,20 @@ export default function App() {
 
   const handleContact = async (leadId, data) => {
     const token = localStorage.getItem('token');
-    
+
+    if (data.closure_outcome) {
+      await fetch(`${API_URL}/api/leads/${leadId}/close`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ closure_outcome: data.closure_outcome, note: data.note })
+      });
+      await syncNow();
+      return;
+    }
+
     if (data.followup) {
       await fetch(`${API_URL}/api/leads/${leadId}/followup`, {
         method: 'POST',
@@ -302,12 +319,20 @@ export default function App() {
             <div className="bg-white rounded-lg shadow p-4">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-semibold">Leads</h2>
-                <button
-                  onClick={syncNow}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Sync
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowAddQuery(true)}
+                    className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    ＋ Add Query
+                  </button>
+                  <button
+                    onClick={syncNow}
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                  >
+                    Sync
+                  </button>
+                </div>
               </div>
               
               <LeadList
@@ -349,6 +374,19 @@ export default function App() {
 
       {showOutbox && (
         <Outbox onClose={() => setShowOutbox(false)} />
+      )}
+
+      {showAddQuery && (
+        <AddQuery
+          requiredQualification={config.eligibility_required_qualification || '12th with Physics & Maths'}
+          onClose={() => setShowAddQuery(false)}
+          onCreated={() => { setShowAddQuery(false); syncNow(); }}
+          onOpenExisting={(leadId) => {
+            setShowAddQuery(false);
+            const existing = leads.find(l => l.id === leadId);
+            if (existing) setSelectedLead(existing);
+          }}
+        />
       )}
 
       {/* Change Password Modal */}
