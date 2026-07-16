@@ -5,7 +5,7 @@ from auth import hash_password
 
 load_dotenv()
 
-ADMIN_PHONE = "admin"
+ADMIN_LOGIN_ID = "admin"
 ADMIN_PASSWORD = "admin"
 
 with get_db() as conn:
@@ -20,14 +20,15 @@ with get_db() as conn:
     cur.execute("""
         INSERT INTO employee (
             name, phone, email, role, department, permission_level,
-            password_hash
+            password_hash, login_id
         ) VALUES (
-            'Admin', %s, 'admin@weoneaviation.in',
-            'owner', 'Admin', 'full_access', %s
+            'Admin', '+919999999999', 'admin@weoneaviation.in',
+            'owner', 'Admin', 'full_access', %s, %s
         )
-    """, (ADMIN_PHONE, hashed))
+    """, (hashed, ADMIN_LOGIN_ID))
     conn.commit()
     
     print("✅ Admin created successfully")
-    print(f"Phone: {ADMIN_PHONE}")
+    print(f"Login ID: {ADMIN_LOGIN_ID}")
     print(f"Password: {ADMIN_PASSWORD}")
+

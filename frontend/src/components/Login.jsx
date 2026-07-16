@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { login } from '../api';
 
 export default function Login({ onLogin, onSwitchToEmployee }) {
-  const [phone, setPhone] = useState('');
+  const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -12,7 +12,7 @@ export default function Login({ onLogin, onSwitchToEmployee }) {
     setError('');
     setLoading(true);
     try {
-      const data = await login(phone, password);
+      const data = await login(loginId, password);
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('employee', JSON.stringify(data.employee));
       onLogin(data.employee);
@@ -33,14 +33,14 @@ export default function Login({ onLogin, onSwitchToEmployee }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Phone
+              Login ID
             </label>
             <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              type="text"
+              value={loginId}
+              onChange={(e) => setLoginId(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="+919876543210"
+              placeholder="admin"
               required
             />
           </div>

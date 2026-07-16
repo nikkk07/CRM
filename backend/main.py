@@ -66,18 +66,18 @@ async def seed_admin():
         cur.execute("""
             INSERT INTO employee (
                 id, name, phone, email, role, department, permission_level,
-                password_hash, date_of_joining, is_active
+                password_hash, date_of_joining, is_active, login_id
             ) VALUES (
-                'EMP001', 'Admin', 'admin', 'admin@weoneaviation.in',
-                'owner', 'Admin', 'full_access', %s, CURRENT_DATE, true
+                'EMP001', 'Admin', '+919999999999', 'admin@weoneaviation.in',
+                'owner', 'Admin', 'full_access', %s, CURRENT_DATE, true, 'admin'
             )
         """, (hashed,))
         conn.commit()
-        return {"status": "admin created", "phone": "admin", "password": "admin"}
+        return {"status": "admin created", "login_id": "admin", "password": "admin"}
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 async def login(req: LoginRequest):
-    emp = authenticate_employee(req.phone, req.password)
+    emp = authenticate_employee(req.login_id, req.password)
     if not emp:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token({"sub": emp["id"]})
@@ -86,39 +86,24 @@ async def login(req: LoginRequest):
 @app.post("/api/auth/employee-login")
 async def employee_login(data: dict):
     """
-    SECURITY WARNING: This passwordless employee login is ONLY for local network use.
-    NEVER expose this endpoint to the public internet. Deploy behind firewall/VPN only.
-    
-    Accepts: employee_id, phone (without country code), or email
-    Optional: login_pin (if set on employee record)
+    Employee login using login_id and optional PIN.
     """
-    identifier = data.get('identifier', '').strip()
+    login_id = data.get('login_id', '').strip()
     pin = data.get('pin', '').strip()
     
-    if not identifier:
-        raise HTTPException(status_code=400, detail="Identifier required")
+    if not login_id:
+        raise HTTPException(status_code=400, detail="Login ID required")
     
     with get_db() as conn:
         cur = conn.cursor()
-        
-        # Try to find employee by employee_id, phone, or email
-        # Phone: normalize by adding +91 prefix if it's 10 digits
-        phone_with_prefix = None
-        if identifier.isdigit() and len(identifier) == 10:
-            phone_with_prefix = f"+91{identifier}"
         
         cur.execute("""
             SELECT id, employee_id, name, phone, email, role, permissions, 
                    login_pin, permission_level, job_role, active, department
             FROM employee
-            WHERE active = true
-              AND (
-                employee_id = %s 
-                OR phone = %s
-                OR LOWER(email) = LOWER(%s)
-              )
+            WHERE active = true AND LOWER(login_id) = LOWER(%s)
             LIMIT 1
-        """, (identifier, phone_with_prefix or identifier, identifier))
+        """, (login_id,))
         
         row = cur.fetchone()
         
@@ -143,7 +128,7 @@ async def employee_login(data: dict):
             "permission_level": permission_level,
             "department": department,
             "job_role": job_role,
-            "is_employee_session": True  # Flag to distinguish from admin session
+            "is_employee_session": True
         }
         
         token = create_access_token({"sub": str(emp_id), "is_employee": True})

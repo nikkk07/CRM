@@ -11,7 +11,7 @@ class EmployeeCreate(BaseModel):
     password: str
 
 class LoginRequest(BaseModel):
-    phone: str
+    login_id: str
     password: str
 
 class TokenResponse(BaseModel):

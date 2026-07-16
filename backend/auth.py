@@ -26,12 +26,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_employee_by_phone(phone: str):
+def get_employee_by_login_id(login_id: str):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, name, phone, email, role, permissions, active, password_hash FROM employee WHERE phone = %s AND active = true",
-            (phone,)
+            "SELECT id, name, phone, email, role, permissions, active, password_hash, login_id FROM employee WHERE LOWER(login_id) = LOWER(%s) AND active = true",
+            (login_id,)
         )
         row = cur.fetchone()
         if not row:
@@ -44,11 +44,12 @@ def get_employee_by_phone(phone: str):
             "role": row[4],
             "permissions": row[5],
             "active": row[6],
-            "password_hash": row[7]
+            "password_hash": row[7],
+            "login_id": row[8]
         }
 
-def authenticate_employee(phone: str, password: str):
-    emp = get_employee_by_phone(phone)
+def authenticate_employee(login_id: str, password: str):
+    emp = get_employee_by_login_id(login_id)
     if not emp or not verify_password(password, emp["password_hash"]):
         return None
     del emp["password_hash"]

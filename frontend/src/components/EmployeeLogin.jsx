@@ -3,7 +3,7 @@ import { showToast } from '../utils/toast';
 import { API_URL } from '../api';
 
 export default function EmployeeLogin({ onLogin }) {
-  const [identifier, setIdentifier] = useState('');
+  const [loginId, setLoginId] = useState('');
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -15,7 +15,7 @@ export default function EmployeeLogin({ onLogin }) {
       const res = await fetch(`${API_URL}/api/auth/employee-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier, pin })
+        body: JSON.stringify({ login_id: loginId, pin })
       });
 
       if (res.ok) {
@@ -36,7 +36,7 @@ export default function EmployeeLogin({ onLogin }) {
   };
 
   const handleBackToAdmin = () => {
-    window.location.reload(); // Simple way to go back to admin login
+    window.location.reload();
   };
 
   return (
@@ -53,18 +53,17 @@ export default function EmployeeLogin({ onLogin }) {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Employee ID / Mobile / Email
+              Login ID
             </label>
             <input
               type="text"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
+              value={loginId}
+              onChange={(e) => setLoginId(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Enter ID, phone, or email"
+              placeholder="Enter your login ID"
               required
               autoFocus
             />
-            <p className="text-xs text-gray-500 mt-1">Mobile: 10 digits without +91</p>
           </div>
 
           <div>
