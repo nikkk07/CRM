@@ -12,10 +12,9 @@ export default function TaskBoard() {
   const [formData, setFormData] = useState({});
   const [currentEmployee, setCurrentEmployee] = useState(null);
 
-  const isEmployeeSession = currentEmployee?.is_employee_session === true;
-  const permissionLevel = currentEmployee?.permission_level || 'regular';
-  const isOwnerOrAdmin = currentEmployee?.role === 'owner' || currentEmployee?.role === 'admin';
-  const canViewAllEmployees = isOwnerOrAdmin || permissionLevel === 'full_access';
+  const department = currentEmployee?.department || '';
+  // Access control via department (aligned with App.jsx): only Admin sees all tasks
+  const canViewAllEmployees = department === 'Admin';
 
   useEffect(() => {
     // Get current employee from localStorage
@@ -44,7 +43,7 @@ export default function TaskBoard() {
       const tasksData = await tasksRes.json();
       setTasks(tasksData);
       
-      // Fetch employees based on permission_level
+      // Fetch employees based on department (Admin sees all)
       if (canViewAllEmployees) {
         try {
           const empRes = await fetch(`${API_URL}/api/employees`, {

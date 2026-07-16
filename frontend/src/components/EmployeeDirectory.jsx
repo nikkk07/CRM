@@ -335,18 +335,14 @@ export default function EmployeeDirectory() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-500">Department</label>
-                  <div className="mt-1 text-gray-900 font-medium">{selectedEmployee.department || '-'}</div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Permission Level</label>
                   <div className="mt-1">
                     <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      selectedEmployee.permission_level === 'full_access' ? 'bg-purple-100 text-purple-800' :
-                      selectedEmployee.permission_level === 'sales' ? 'bg-blue-100 text-blue-800' :
+                      selectedEmployee.department === 'Admin' ? 'bg-purple-100 text-purple-800' :
+                      selectedEmployee.department === 'Sales' ? 'bg-blue-100 text-blue-800' :
+                      selectedEmployee.department === 'IT' ? 'bg-green-100 text-green-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
-                      {selectedEmployee.permission_level === 'full_access' ? 'Full Access' :
-                       selectedEmployee.permission_level === 'sales' ? 'Sales' : 'Regular'}
+                      {selectedEmployee.department}
                     </span>
                   </div>
                 </div>
@@ -588,22 +584,13 @@ Enter 1, 2, or 3:`);
                   value={formData.department || ''} 
                   onChange={(e) => setFormData({...formData, department: e.target.value})} 
                   className="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500"
+                  required
                 >
-                  <option value="">Select Department</option>
+                  <option value="">Select Department *</option>
                   <option value="Admin">Admin</option>
                   <option value="IT">IT</option>
                   <option value="Sales">Sales</option>
                   <option value="Instructors">Instructors</option>
-                </select>
-                <select 
-                  value={formData.permission_level || 'regular'} 
-                  onChange={(e) => setFormData({...formData, permission_level: e.target.value})} 
-                  className="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500"
-                  title="Controls access: full_access=all tabs, sales=leads+outbox, regular=own tasks/profile only"
-                >
-                  <option value="regular">Regular (Own Tasks Only)</option>
-                  <option value="sales">Sales (Leads + Outbox)</option>
-                  <option value="full_access">Full Access (All Tabs)</option>
                 </select>
                 <input 
                   type="tel" 

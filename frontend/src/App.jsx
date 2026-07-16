@@ -30,13 +30,12 @@ export default function App() {
   const [passwordError, setPasswordError] = useState('');
 
   const isEmployeeSession = employee?.is_employee_session === true;
-  const permissionLevel = employee?.permission_level || 'regular';
-  const isOwnerOrAdmin = employee?.role === 'owner' || employee?.role === 'admin';
+  const department = employee?.department || '';
   
-  // Access control via permission_level
-  const canAccessLeads = isOwnerOrAdmin || permissionLevel === 'full_access' || permissionLevel === 'sales';
-  const canAccessDirectory = isOwnerOrAdmin || permissionLevel === 'full_access';
-  const canAccessAllTasks = isOwnerOrAdmin || permissionLevel === 'full_access';
+  // Access control via department
+  const canAccessLeads = department === 'Admin' || department === 'Sales';
+  const canAccessDirectory = department === 'Admin';
+  const canAccessAllTasks = department === 'Admin';
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -230,7 +229,7 @@ export default function App() {
             Team
           </button>
         )}
-        {(isOwnerOrAdmin || permissionLevel === 'full_access') && (
+        {department === 'Admin' && (
           <button
             onClick={() => setActiveTab('policy')}
             className={`px-6 py-3 ${activeTab === 'policy' ? 'border-b-2 border-blue-600 font-semibold' : ''}`}
@@ -327,7 +326,7 @@ export default function App() {
           <EmployeeDirectory />
         )}
 
-        {activeTab === 'policy' && (isOwnerOrAdmin || permissionLevel === 'full_access') && (
+        {activeTab === 'policy' && department === 'Admin' && (
           <PolicyDocs />
         )}
 
