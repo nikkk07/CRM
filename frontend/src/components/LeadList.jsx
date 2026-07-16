@@ -9,10 +9,6 @@ export default function LeadList({ leads, onSelectLead }) {
     if (filter === 'not-interested') return l.status === 'Not interested';
     if (filter === 'not-reachable') return l.status === 'Not reachable';
     if (filter === 'callback') return l.status === 'Callback';
-    if (filter === 'connected') return l.status === 'Connected';
-    if (filter === 'wrong-number') return l.status === 'Wrong number';
-    if (filter === 'parked') return l.parked === true;
-    if (filter === 'closed') return l.closed === true;
     return true;
   });
   
@@ -56,40 +52,16 @@ export default function LeadList({ leads, onSelectLead }) {
           Callback ({leads.filter(l => l.status === 'Callback').length})
         </button>
         <button
-          onClick={() => setFilter('connected')}
-          className={`px-3 py-1 rounded text-sm ${filter === 'connected' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-        >
-          Connected ({leads.filter(l => l.status === 'Connected').length})
-        </button>
-        <button
           onClick={() => setFilter('not-reachable')}
           className={`px-3 py-1 rounded text-sm ${filter === 'not-reachable' ? 'bg-yellow-600 text-white' : 'bg-gray-200'}`}
         >
           Not Reachable ({leads.filter(l => l.status === 'Not reachable').length})
         </button>
         <button
-          onClick={() => setFilter('wrong-number')}
-          className={`px-3 py-1 rounded text-sm ${filter === 'wrong-number' ? 'bg-red-600 text-white' : 'bg-gray-200'}`}
-        >
-          Wrong Number ({leads.filter(l => l.status === 'Wrong number').length})
-        </button>
-        <button
           onClick={() => setFilter('not-interested')}
           className={`px-3 py-1 rounded text-sm ${filter === 'not-interested' ? 'bg-gray-600 text-white' : 'bg-gray-200'}`}
         >
           Not Interested ({leads.filter(l => l.status === 'Not interested').length})
-        </button>
-        <button
-          onClick={() => setFilter('parked')}
-          className={`px-3 py-1 rounded text-sm ${filter === 'parked' ? 'bg-amber-600 text-white' : 'bg-gray-200'}`}
-        >
-          Parked ({leads.filter(l => l.parked === true).length})
-        </button>
-        <button
-          onClick={() => setFilter('closed')}
-          className={`px-3 py-1 rounded text-sm ${filter === 'closed' ? 'bg-stone-600 text-white' : 'bg-gray-200'}`}
-        >
-          Closed ({leads.filter(l => l.closed === true).length})
         </button>
       </div>
       
@@ -108,29 +80,15 @@ export default function LeadList({ leads, onSelectLead }) {
                   <div className="text-sm text-gray-500">{lead.course_interest}</div>
                 </div>
                 <div className="text-right">
-                  <div className="flex flex-col gap-1 items-end">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      lead.status === 'Interested' ? 'bg-green-100 text-green-800' :
-                      lead.status === 'Not interested' ? 'bg-gray-100 text-gray-800' :
-                      lead.status === 'Not reachable' ? 'bg-yellow-100 text-yellow-800' :
-                      lead.status === 'Callback' ? 'bg-purple-100 text-purple-800' :
-                      lead.status === 'Connected' ? 'bg-blue-100 text-blue-800' :
-                      lead.status === 'Wrong number' ? 'bg-red-100 text-red-800' :
-                      'bg-blue-100 text-blue-800'
-                    }`}>
-                      {lead.status}
-                    </span>
-                    {lead.parked && (
-                      <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800">
-                        🅿️ Parked
-                      </span>
-                    )}
-                    {lead.closed && (
-                      <span className="px-2 py-0.5 rounded text-xs bg-stone-100 text-stone-800">
-                        🔒 Closed
-                      </span>
-                    )}
-                  </div>
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                    lead.status === 'Interested' ? 'bg-green-100 text-green-800' :
+                    lead.status === 'Not interested' ? 'bg-gray-100 text-gray-800' :
+                    lead.status === 'Not reachable' ? 'bg-yellow-100 text-yellow-800' :
+                    lead.status === 'Callback' ? 'bg-purple-100 text-purple-800' :
+                    'bg-blue-100 text-blue-800'
+                  }`}>
+                    {lead.status}
+                  </span>
                 </div>
               </div>
               
