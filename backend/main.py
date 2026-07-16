@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -7,6 +7,8 @@ from database import get_db
 from auth import authenticate_employee, create_access_token, get_current_employee, hash_password
 from schemas import LoginRequest, TokenResponse, EmployeeCreate
 from lead_ingestion import ingest_lead, normalize_phone
+import r2_storage
+import io
 from sla_monitor import start_sla_monitor
 from quote_generator import generate_quote_pdf
 from encryption import encrypt_value, decrypt_value
@@ -1492,6 +1494,279 @@ async def get_callback_leads(current_emp = Depends(get_current_employee)):
             }
             for r in cur.fetchall()
         ]
+
+# ============================ STUDENTS MODULE ============================
+
+STUDENT_DOC_TYPES = [
+    'photo_id_proof', 'passport_photo', 'signature',
+    'marksheet_10', 'certificate_10', 'marksheet_12', 'certificate_12',
+    'board_verification_10', 'board_verification_12',
+    'passport', 'i20_admission_letter', 'medical',
+]
+_ALLOWED_IMAGE_FORMATS = {'JPEG', 'PNG', 'HEIF', 'HEIC'}
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_heif_registered = False
+
+
+def _require_students_access(current_emp):
+    # Fail-closed department gate, consistent with leads: only Admin/Sales.
+    if current_emp['department'] not in ('Admin', 'Sales'):
+        raise HTTPException(status_code=403, detail="Students access requires Admin or Sales department")
+
+
+def _process_image(raw: bytes):
+    """Validate real image type from CONTENT (not extension), enforce size, convert HEIC/HEIF->JPEG.
+    Returns (out_bytes, mime_type, ext). Rejects anything that is not JPEG/PNG/HEIF/HEIC."""
+    global _heif_registered
+    if len(raw) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 10MB limit")
+    from PIL import Image
+    if not _heif_registered:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+        _heif_registered = True
+    try:
+        img = Image.open(io.BytesIO(raw))
+        fmt = (img.format or '').upper()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Unreadable or invalid image file")
+    if fmt not in _ALLOWED_IMAGE_FORMATS:
+        raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: JPEG, PNG, HEIF, HEIC")
+    if fmt in ('HEIF', 'HEIC'):
+        out = io.BytesIO()
+        img.convert('RGB').save(out, format='JPEG', quality=90)
+        return out.getvalue(), 'image/jpeg', 'jpg'
+    if fmt == 'PNG':
+        return raw, 'image/png', 'png'
+    return raw, 'image/jpeg', 'jpg'
+
+
+def _audit(cur, actor, action, entity, payload):
+    cur.execute(
+        "INSERT INTO audit_log (actor, action, entity, payload) VALUES (%s, %s, %s, %s)",
+        (actor, action, entity, json.dumps(payload))
+    )
+
+
+@app.get("/api/students")
+async def list_students(search: str = "", current_emp = Depends(get_current_employee)):
+    _require_students_access(current_emp)
+    with get_db() as conn:
+        cur = conn.cursor()
+        like = f"%{search.strip()}%"
+        cur.execute("""
+            SELECT s.id, s.first_name, s.middle_name, s.last_name, s.mobile, s.course,
+                   s.admission_date, s.computer_number,
+                   (SELECT COUNT(DISTINCT doc_type) FROM student_document WHERE student_id = s.id) AS doc_count
+            FROM student s
+            WHERE (%s = '' OR
+                   s.first_name ILIKE %s OR s.last_name ILIKE %s OR s.middle_name ILIKE %s OR
+                   s.mobile ILIKE %s OR s.computer_number ILIKE %s OR s.course ILIKE %s)
+            ORDER BY s.created_at DESC
+        """, (search.strip(), like, like, like, like, like, like))
+        total = len(STUDENT_DOC_TYPES)
+        return [
+            {
+                "id": str(r[0]),
+                "name": " ".join(x for x in [r[1], r[2], r[3]] if x),
+                "mobile": r[4], "course": r[5],
+                "admission_date": r[6].isoformat() if r[6] else None,
+                "computer_number": r[7],
+                "documents_complete": r[8], "documents_total": total,
+            }
+            for r in cur.fetchall()
+        ]
+
+
+@app.get("/api/students/prefill-leads")
+async def student_prefill_leads(current_emp = Depends(get_current_employee)):
+    """Leads with completed admissions, for prefilling Add Student."""
+    _require_students_access(current_emp)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, guardian_name, phone, address, course_interest
+            FROM lead
+            WHERE closure_outcome = 'admission_completed'
+            ORDER BY created_at DESC
+        """)
+        return [
+            {"id": str(r[0]), "name": r[1], "guardian_name": r[2], "phone": r[3],
+             "address": r[4], "course_interest": r[5]}
+            for r in cur.fetchall()
+        ]
+
+
+@app.get("/api/students/{student_id}")
+async def get_student(student_id: str, current_emp = Depends(get_current_employee)):
+    _require_students_access(current_emp)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, first_name, middle_name, last_name, guardian_name, mobile,
+                   emergency_contact, address, course, admission_date, computer_number, lead_id, created_at
+            FROM student WHERE id = %s
+        """, (student_id,))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Student not found")
+        student = {
+            "id": str(r[0]), "first_name": r[1], "middle_name": r[2], "last_name": r[3],
+            "guardian_name": r[4], "mobile": r[5], "emergency_contact": r[6], "address": r[7],
+            "course": r[8], "admission_date": r[9].isoformat() if r[9] else None,
+            "computer_number": r[10], "lead_id": str(r[11]) if r[11] else None,
+            "created_at": r[12].isoformat() if r[12] else None,
+        }
+        cur.execute("""
+            SELECT id, doc_type, original_filename, mime_type, size_bytes, uploaded_at
+            FROM student_document WHERE student_id = %s ORDER BY uploaded_at DESC
+        """, (student_id,))
+        docs = {}
+        for d in cur.fetchall():
+            docs[d[1]] = {
+                "id": str(d[0]), "doc_type": d[1], "original_filename": d[2],
+                "mime_type": d[3], "size_bytes": d[4],
+                "uploaded_at": d[5].isoformat() if d[5] else None,
+            }
+        student["doc_types"] = STUDENT_DOC_TYPES
+        student["documents"] = docs  # keyed by doc_type; missing types absent
+        return student
+
+
+@app.post("/api/students")
+async def create_student(data: dict, current_emp = Depends(get_current_employee)):
+    _require_students_access(current_emp)
+    first = (data.get('first_name') or '').strip()
+    last = (data.get('last_name') or '').strip()
+    raw_mobile = (data.get('mobile') or '').strip()
+    if not first or not last or not raw_mobile:
+        raise HTTPException(status_code=400, detail="first_name, last_name and mobile are required")
+    mobile_norm = normalize_phone(raw_mobile)
+    emergency = normalize_phone(data['emergency_contact']) if data.get('emergency_contact') else None
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, first_name, last_name FROM student WHERE mobile_normalized = %s", (mobile_norm,))
+        dup = cur.fetchone()
+        if dup:
+            return {"status": "duplicate", "student_id": str(dup[0]),
+                    "name": f"{dup[1]} {dup[2]}".strip()}
+        cur.execute("""
+            INSERT INTO student (first_name, middle_name, last_name, guardian_name, mobile,
+                                 mobile_normalized, emergency_contact, address, course,
+                                 admission_date, computer_number, lead_id, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s, %s, %s)
+            RETURNING id
+        """, (first, data.get('middle_name'), last, data.get('guardian_name'), mobile_norm,
+              mobile_norm, emergency, data.get('address'), data.get('course'),
+              data.get('admission_date'), data.get('computer_number'), data.get('lead_id'),
+              current_emp['id']))
+        student_id = cur.fetchone()[0]
+        _audit(cur, current_emp['id'], 'create', 'student', {"student_id": str(student_id)})
+        return {"status": "created", "student_id": str(student_id)}
+
+
+@app.patch("/api/students/{student_id}")
+async def update_student(student_id: str, data: dict, current_emp = Depends(get_current_employee)):
+    _require_students_access(current_emp)
+    allowed = {'first_name', 'middle_name', 'last_name', 'guardian_name', 'address',
+               'course', 'admission_date', 'computer_number', 'emergency_contact'}
+    fields, values = [], []
+    for k in allowed:
+        if k in data:
+            val = data[k]
+            if k == 'emergency_contact' and val:
+                val = normalize_phone(val)
+            fields.append(f"{k} = %s")
+            values.append(val)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No editable fields provided")
+    fields.append("updated_at = NOW()")
+    values.append(student_id)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE student SET {', '.join(fields)} WHERE id = %s RETURNING id", values)
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Student not found")
+        _audit(cur, current_emp['id'], 'edit', 'student',
+               {"student_id": student_id, "fields": [f.split(' =')[0] for f in fields if '=' in f]})
+    return {"status": "updated"}
+
+
+@app.post("/api/students/{student_id}/documents")
+async def upload_student_document(
+    student_id: str,
+    doc_type: str = Form(...),
+    file: UploadFile = File(...),
+    current_emp = Depends(get_current_employee),
+):
+    _require_students_access(current_emp)
+    if doc_type not in STUDENT_DOC_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid doc_type")
+    raw = await file.read()
+    out_bytes, mime, ext = _process_image(raw)  # validates content + converts HEIC->JPEG
+    key = r2_storage.build_key(student_id, doc_type, ext)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM student WHERE id = %s", (student_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Student not found")
+        # Replace: remove any existing file of this doc_type (delete old R2 object first)
+        cur.execute("SELECT id, r2_key FROM student_document WHERE student_id = %s AND doc_type = %s",
+                    (student_id, doc_type))
+        old = cur.fetchone()
+        r2_storage.upload_bytes(key, out_bytes, mime)
+        if old:
+            try:
+                r2_storage.delete_object(old[1])
+            except Exception:
+                pass
+            cur.execute("DELETE FROM student_document WHERE id = %s", (old[0],))
+        cur.execute("""
+            INSERT INTO student_document (student_id, doc_type, r2_key, original_filename,
+                                          mime_type, size_bytes, uploaded_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+        """, (student_id, doc_type, key, file.filename, mime, len(out_bytes), current_emp['id']))
+        doc_id = cur.fetchone()[0]
+        _audit(cur, current_emp['id'], 'upload_document', 'student_document',
+               {"student_id": student_id, "doc_type": doc_type, "replaced": bool(old)})
+    return {"status": "uploaded", "id": str(doc_id), "doc_type": doc_type}
+
+
+@app.get("/api/students/{student_id}/documents/{doc_id}/url")
+async def get_student_document_url(student_id: str, doc_id: str, current_emp = Depends(get_current_employee)):
+    _require_students_access(current_emp)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT r2_key, doc_type FROM student_document WHERE id = %s AND student_id = %s",
+                    (doc_id, student_id))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Document not found")
+        url = r2_storage.presigned_get(r[0], expires=300)  # <= 5 min
+        _audit(cur, current_emp['id'], 'view_document', 'student_document',
+               {"student_id": student_id, "doc_id": doc_id, "doc_type": r[1]})
+    return {"url": url, "expires_in": 300}
+
+
+@app.delete("/api/students/{student_id}/documents/{doc_id}")
+async def delete_student_document(student_id: str, doc_id: str, current_emp = Depends(get_current_employee)):
+    _require_students_access(current_emp)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT r2_key, doc_type FROM student_document WHERE id = %s AND student_id = %s",
+                    (doc_id, student_id))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Document not found")
+        try:
+            r2_storage.delete_object(r[0])
+        except Exception:
+            pass
+        cur.execute("DELETE FROM student_document WHERE id = %s", (doc_id,))
+        _audit(cur, current_emp['id'], 'delete_document', 'student_document',
+               {"student_id": student_id, "doc_id": doc_id, "doc_type": r[1]})
+    return {"status": "deleted"}
+
 
 if __name__ == "__main__":
     import uvicorn

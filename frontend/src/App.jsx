@@ -10,6 +10,7 @@ import MyProfile from './components/MyProfile';
 import LeaveCalendar from './components/LeaveCalendar';
 import PolicyDocs from './components/PolicyDocs';
 import AddQuery from './components/AddQuery';
+import StudentDirectory from './components/StudentDirectory';
 import { syncData, API_URL } from './api';
 
 export default function App() {
@@ -246,6 +247,14 @@ export default function App() {
             Leads
           </button>
         )}
+        {canAccessLeads && (
+          <button
+            onClick={() => setActiveTab('students')}
+            className={`px-6 py-3 ${activeTab === 'students' ? 'border-b-2 border-blue-600 font-semibold' : ''}`}
+          >
+            Students
+          </button>
+        )}
         <button
           onClick={() => setActiveTab('tasks')}
           className={`px-6 py-3 ${activeTab === 'tasks' ? 'border-b-2 border-blue-600 font-semibold' : ''}`}
@@ -368,6 +377,10 @@ export default function App() {
               />
             </div>
           </>
+        )}
+
+        {activeTab === 'students' && canAccessLeads && (
+          <StudentDirectory />
         )}
 
         {activeTab === 'tasks' && (
