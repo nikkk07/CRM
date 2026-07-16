@@ -167,12 +167,15 @@ async def change_password(data: dict, current_emp = Depends(get_current_employee
 
 @app.post("/api/auth/register")
 async def register(req: EmployeeCreate, current_emp = Depends(get_current_employee)):
+    # department is NOT NULL (migration 020) and enum-constrained; reject unknown values before insert
+    if req.department not in ('Admin', 'IT', 'Sales', 'Instructors'):
+        raise HTTPException(status_code=400, detail="department must be one of: Admin, IT, Sales, Instructors")
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO employee (name, phone, email, role, permissions, password_hash)
+            """INSERT INTO employee (name, phone, email, department, permissions, password_hash)
                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-            (req.name, req.phone, req.email, req.role, json.dumps(req.permissions), hash_password(req.password))
+            (req.name, req.phone, req.email, req.department, json.dumps(req.permissions), hash_password(req.password))
         )
         emp_id = cur.fetchone()[0]
         cur.execute(
@@ -594,11 +597,11 @@ async def sync_snapshot(current_emp = Depends(get_current_employee)):
     with get_db() as conn:
         cur = conn.cursor()
         
-        cur.execute("SELECT id, name, phone, email, role, permissions, active, created_at FROM employee WHERE active = true")
+        cur.execute("SELECT id, name, phone, email, department, permissions, active, created_at FROM employee WHERE active = true")
         employees = [
             {
                 "id": str(r[0]), "name": r[1], "phone": r[2], "email": r[3],
-                "role": r[4], "permissions": r[5], "active": r[6], "created_at": r[7].isoformat()
+                "department": r[4], "permissions": r[5], "active": r[6], "created_at": r[7].isoformat()
             }
             for r in cur.fetchall()
         ]
@@ -960,20 +963,25 @@ async def create_employee(data: dict, current_emp = Depends(get_current_employee
         pay_scale_encrypted = None
         if data.get('pay_scale'):
             pay_scale_encrypted = encrypt_value(data['pay_scale'])
-        
+
+        # department is NOT NULL + enum-constrained (migration 020). Default to most restrictive; reject unknown.
+        department = data.get('department') or 'IT'
+        if department not in ('Admin', 'IT', 'Sales', 'Instructors'):
+            raise HTTPException(status_code=400, detail="department must be one of: Admin, IT, Sales, Instructors")
+
         cur.execute(
             """INSERT INTO employee (
-                employee_id, name, phone, email, job_role, address, 
+                employee_id, name, phone, email, job_role, address,
                 pay_scale_encrypted, joining_date, status, date_of_leaving,
-                role, password_hash, permissions
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+                department, password_hash, permissions
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id""",
             (
                 data.get('employee_id'), data.get('name'), data.get('phone'),
                 data.get('email'), data.get('job_role'), data.get('address'),
-                pay_scale_encrypted, data.get('joining_date'), 
+                pay_scale_encrypted, data.get('joining_date'),
                 data.get('status', 'active'), data.get('date_of_leaving'),
-                data.get('role', 'admin'),
+                department,
                 hash_password(data.get('password', 'welcome123')),
                 json.dumps(data.get('permissions', {}))
             )

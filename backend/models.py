@@ -8,7 +8,7 @@ class Employee(BaseModel):
     name: str
     phone: str
     email: Optional[str]
-    role: str
+    department: str
     permissions: dict
     active: bool
     created_at: datetime

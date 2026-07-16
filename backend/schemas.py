@@ -6,7 +6,8 @@ class EmployeeCreate(BaseModel):
     name: str
     phone: str
     email: Optional[str] = None
-    role: str = "admin"
+    # Most restrictive default (own-profile-only). A new employee must never be created with NULL department.
+    department: str = "IT"
     permissions: dict = {}
     password: str
 
