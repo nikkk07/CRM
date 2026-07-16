@@ -1692,6 +1692,45 @@ async def update_student(student_id: str, data: dict, current_emp = Depends(get_
     return {"status": "updated"}
 
 
+@app.delete("/api/students/{student_id}")
+async def delete_student(student_id: str, current_emp = Depends(get_current_employee)):
+    _require_students_access(current_emp)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT first_name, middle_name, last_name, mobile FROM student WHERE id = %s", (student_id,))
+        s = cur.fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail="Student not found")
+        student_name = " ".join(x for x in [s[0], s[1], s[2]] if x)
+        mobile = s[3]
+
+        cur.execute("SELECT COUNT(*), COALESCE(ARRAY_AGG(r2_key), '{}') FROM student_document WHERE student_id = %s", (student_id,))
+        doc_count, db_keys = cur.fetchone()
+
+        # 1) Delete ALL R2 objects FIRST. Union of DB keys + anything under the prefix (catch strays).
+        prefix = f"students/{student_id}/"
+        try:
+            keys = set(db_keys) | set(r2_storage.list_keys(prefix))
+            for k in keys:
+                r2_storage.delete_object(k)
+            # 2) Verify nothing remains before we touch the DB — no orphaned objects.
+            remaining = r2_storage.list_keys(prefix)
+        except Exception as e:
+            # Abort: DB rows untouched, so nothing is orphaned; objects still referenced.
+            raise HTTPException(status_code=502, detail=f"R2 delete failed, aborted; no rows removed: {e}")
+        if remaining:
+            raise HTTPException(status_code=502, detail=f"R2 objects still present under {prefix}; aborted")
+
+        # 3) Now the DB rows: documents, then the student.
+        cur.execute("DELETE FROM student_document WHERE student_id = %s", (student_id,))
+        cur.execute("DELETE FROM student WHERE id = %s", (student_id,))
+        # 4) The row disappears; the deletion record must not.
+        _audit(cur, current_emp['id'], 'delete', 'student',
+               {"student_id": student_id, "name": student_name, "mobile": mobile,
+                "documents_removed": doc_count})
+    return {"status": "deleted", "documents_removed": doc_count}
+
+
 @app.post("/api/students/{student_id}/documents")
 async def upload_student_document(
     student_id: str,

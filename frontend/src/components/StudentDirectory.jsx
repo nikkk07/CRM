@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { API_URL } from '../api';
 import { showToast } from '../utils/toast';
+import { COURSES } from '../constants/courses';
 
 const DOC_LABELS = {
   photo_id_proof: 'Photo ID Proof',
@@ -204,7 +205,10 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
           </div>
           <input className={input} placeholder="Address" value={form.address} onChange={(e) => set('address', e.target.value)} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input className={input} placeholder="Course" value={form.course} onChange={(e) => set('course', e.target.value)} />
+            <select className={input} value={form.course} onChange={(e) => set('course', e.target.value)} required>
+              <option value="">Select Course *</option>
+              {COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
             <input className={input} placeholder="Computer Number (DGCA)" value={form.computer_number} onChange={(e) => set('computer_number', e.target.value)} />
           </div>
           <div>
@@ -223,6 +227,23 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
 function StudentDetail({ studentId, onBack }) {
   const [student, setStudent] = useState(null);
   const [busy, setBusy] = useState('');
+  const [showDelete, setShowDelete] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const deleteStudent = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`${API_URL}/api/students/${studentId}`, {
+        method: 'DELETE', headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      setDeleting(false);
+      if (!res.ok) { showToast(data.detail || 'Delete failed', 'error'); return; }
+      showToast('Student deleted', 'success');
+      onBack();
+    } catch { setDeleting(false); showToast('Delete failed', 'error'); }
+  };
 
   const load = async () => {
     const res = await fetch(`${API_URL}/api/students/${studentId}`, { headers: authHeaders() });
@@ -275,7 +296,13 @@ function StudentDetail({ studentId, onBack }) {
 
   return (
     <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-      <button onClick={onBack} className="text-blue-600 hover:underline mb-4">← Back to Students</button>
+      <div className="flex justify-between items-center mb-4">
+        <button onClick={onBack} className="text-blue-600 hover:underline">← Back to Students</button>
+        <button onClick={() => { setShowDelete(true); setConfirmText(''); }}
+          className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700">
+          Delete Student
+        </button>
+      </div>
 
       <h2 className="text-2xl font-bold text-gray-900">
         {[student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ')}
@@ -325,6 +352,37 @@ function StudentDetail({ studentId, onBack }) {
           );
         })}
       </div>
+
+      {showDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-red-700 mb-2">Delete Student</h3>
+            <p className="text-sm text-gray-700 mb-4">
+              This permanently deletes <span className="font-semibold">{[student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ')}</span>,
+              all {uploadedCount} document(s), and every stored file. This cannot be undone.
+            </p>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Type <span className="font-mono font-bold">DELETE</span> to confirm</label>
+            <input
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-red-500 mb-4"
+              autoFocus
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={deleteStudent}
+                disabled={confirmText !== 'DELETE' || deleting}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded font-semibold hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                {deleting ? 'Deleting…' : 'Delete Permanently'}
+              </button>
+              <button onClick={() => setShowDelete(false)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

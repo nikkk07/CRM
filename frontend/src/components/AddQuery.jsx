@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { API_URL } from '../api';
 import { showToast } from '../utils/toast';
+import { COURSES } from '../constants/courses';
 
 const SOURCES = ['We One Aviation', 'JustDial', 'Walk-in', 'Direct Call', 'Direct Message', 'Flying Star'];
-const COURSES = ['ATPL', 'CPL', 'PPL', 'Flying'];
 const QUALIFICATIONS = ['10th', '12th with Physics & Maths', '12th without Physics & Maths', 'Graduation'];
 
 export default function AddQuery({ requiredQualification, onClose, onCreated, onOpenExisting }) {

@@ -49,3 +49,19 @@ def presigned_get(key: str, expires: int = 300) -> str:
 
 def delete_object(key: str):
     _r2().delete_object(Bucket=_bucket(), Key=key)
+
+
+def list_keys(prefix: str) -> list:
+    """All object keys under a prefix (paginated). Used to catch strays before a hard delete."""
+    keys = []
+    token = None
+    while True:
+        kwargs = {"Bucket": _bucket(), "Prefix": prefix}
+        if token:
+            kwargs["ContinuationToken"] = token
+        resp = _r2().list_objects_v2(**kwargs)
+        keys.extend(obj["Key"] for obj in resp.get("Contents", []))
+        if not resp.get("IsTruncated"):
+            break
+        token = resp.get("NextContinuationToken")
+    return keys
