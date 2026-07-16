@@ -17,6 +17,7 @@ export default function App() {
   const [showEmployeeLogin, setShowEmployeeLogin] = useState(false);
   const [lastSync, setLastSync] = useState(null);
   const [leads, setLeads] = useState([]);
+  const [leadsError, setLeadsError] = useState('');
   const [followups, setFollowups] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
   const [showOutbox, setShowOutbox] = useState(false);
@@ -71,7 +72,8 @@ export default function App() {
         if (leadsRes.ok) {
           const leadsData = await leadsRes.json();
           setLeads(leadsData);
-          
+          setLeadsError('');
+
           const followupsRes = await fetch(`${API_URL}/api/followups/pending`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
@@ -79,9 +81,14 @@ export default function App() {
             const followupsData = await followupsRes.json();
             setFollowups(followupsData);
           }
+        } else {
+          // Surface the failure — a 500 must not silently render as "0 leads"
+          let detail = '';
+          try { detail = (await leadsRes.json()).detail || ''; } catch { /* non-JSON body */ }
+          setLeadsError(`Failed to load leads (HTTP ${leadsRes.status}${detail ? `: ${detail}` : ''}). Data was not loaded.`);
         }
       }
-      
+
       if (!isEmployeeSession) {
         const snapshot = await syncData(token);
         setLastSync(new Date(snapshot.synced_at));
@@ -93,6 +100,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('Sync failed:', err);
+      setLeadsError('Could not reach the server. Check your connection and retry.');
     }
   };
 
@@ -273,7 +281,20 @@ export default function App() {
       </div>
 
       <div className="p-4">
-        {activeTab === 'leads' && canAccessLeads && (
+        {activeTab === 'leads' && canAccessLeads && leadsError && (
+          <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6 text-center">
+            <div className="text-lg font-semibold text-red-800 mb-1">⚠️ Couldn’t load leads</div>
+            <p className="text-sm text-red-700 mb-4">{leadsError}</p>
+            <button
+              onClick={syncNow}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {activeTab === 'leads' && canAccessLeads && !leadsError && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div className="bg-white rounded-lg shadow p-4">
