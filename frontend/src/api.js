@@ -14,5 +14,12 @@ export async function syncData(token) {
   const res = await fetch(`${API_URL}/api/sync`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
+  if (!res.ok) {
+    // Carry the HTTP status so callers can distinguish a server error from an unreachable server
+    const err = new Error(`Sync failed (HTTP ${res.status})`);
+    err.status = res.status;
+    try { err.detail = (await res.json()).detail; } catch { /* non-JSON body */ }
+    throw err;
+  }
   return res.json();
 }

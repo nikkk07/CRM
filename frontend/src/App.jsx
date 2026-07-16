@@ -82,10 +82,10 @@ export default function App() {
             setFollowups(followupsData);
           }
         } else {
-          // Surface the failure — a 500 must not silently render as "0 leads"
+          // Non-2xx: the server responded with an error. A 500 must not silently render as "0 leads".
           let detail = '';
           try { detail = (await leadsRes.json()).detail || ''; } catch { /* non-JSON body */ }
-          setLeadsError(`Failed to load leads (HTTP ${leadsRes.status}${detail ? `: ${detail}` : ''}). Data was not loaded.`);
+          setLeadsError(`Server error (HTTP ${leadsRes.status})${detail ? `: ${detail}` : ''}. Data was not loaded.`);
         }
       }
 
@@ -100,7 +100,13 @@ export default function App() {
       }
     } catch (err) {
       console.error('Sync failed:', err);
-      setLeadsError('Could not reach the server. Check your connection and retry.');
+      if (err && err.status) {
+        // The server responded with a non-2xx (e.g. from /api/sync) — a real server-side error
+        setLeadsError(`Server error (HTTP ${err.status})${err.detail ? `: ${err.detail}` : ''}. Data was not loaded.`);
+      } else {
+        // No HTTP response at all — network/DNS/CORS/connection failure
+        setLeadsError('Could not reach the server. Check your connection and retry.');
+      }
     }
   };
 
