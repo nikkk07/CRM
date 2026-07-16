@@ -1,5 +1,6 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from database import get_db
+from keepalive import self_ping
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ def check_sla_breaches():
 def start_sla_monitor():
     scheduler = BackgroundScheduler()
     scheduler.add_job(check_sla_breaches, 'interval', minutes=5)
+    scheduler.add_job(self_ping, 'interval', minutes=10, id='self_ping')
     scheduler.start()
     logger.info("SLA monitor started")
+    logger.info("Self-ping registered (10min interval)")
     return scheduler

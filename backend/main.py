@@ -231,6 +231,7 @@ async def get_leads(current_emp = Depends(get_current_employee)):
             SELECT l.id, l.name, l.phone, l.email, l.address, l.course_interest, 
                    l.utm_source, l.utm_medium, l.utm_campaign, l.status, l.assigned_to,
                    l.created_at, l.first_contacted_at, l.dedup_key, l.last_note,
+                   COALESCE(l.parked, FALSE) as parked, COALESCE(l.closed, FALSE) as closed,
                    (SELECT COUNT(*) FROM contact_attempt WHERE lead_id = l.id AND disposition = 'Not reachable') as not_reachable_count,
                    EXTRACT(EPOCH FROM (NOW() - l.created_at))/60 as age_minutes
             FROM lead l
@@ -243,7 +244,8 @@ async def get_leads(current_emp = Depends(get_current_employee)):
                 "course_interest": r[5], "utm_source": r[6], "utm_medium": r[7], "utm_campaign": r[8],
                 "status": r[9] or "new", "assigned_to": str(r[10]) if r[10] else None,
                 "created_at": r[11].isoformat(), "first_contacted_at": r[12].isoformat() if r[12] else None,
-                "dedup_key": r[13], "last_note": r[14], "not_reachable_count": r[15], "age_minutes": float(r[16])
+                "dedup_key": r[13], "last_note": r[14], "parked": r[15], "closed": r[16],
+                "not_reachable_count": r[17], "age_minutes": float(r[18])
             })
     return leads
 
@@ -274,48 +276,27 @@ async def log_contact(lead_id: str, data: dict, current_emp = Depends(get_curren
         )
         attempt_id = cur.fetchone()[0]
         
-        cur.execute("UPDATE lead SET first_contacted_at = COALESCE(first_contacted_at, NOW()), status = %s, last_note = %s WHERE id = %s", 
-                    (disposition, note, lead_id))
+        # Update status and note - status is single source of truth
+        cur.execute("""
+            UPDATE lead 
+            SET first_contacted_at = COALESCE(first_contacted_at, NOW()), 
+                status = %s, 
+                last_note = %s 
+            WHERE id = %s
+        """, (disposition, note, lead_id))
         
-        # FIRST: Remove lead from ALL disposition tables to avoid duplicates
-        cur.execute("DELETE FROM interested WHERE lead_id = %s", (lead_id,))
-        cur.execute("DELETE FROM not_interested WHERE lead_id = %s", (lead_id,))
-        cur.execute("DELETE FROM not_reachable WHERE lead_id = %s", (lead_id,))
-        cur.execute("DELETE FROM callback WHERE lead_id = %s", (lead_id,))
+        # Set flags based on disposition (don't overwrite status)
+        if disposition == 'Not interested':
+            cur.execute("UPDATE lead SET closed = TRUE WHERE id = %s", (lead_id,))
         
-        # THEN: Insert into the correct disposition table only
-        if disposition == 'Interested':
-            cur.execute("""
-                INSERT INTO interested (lead_id, name, phone, email, course_interest, address, note, marked_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (lead_id, name, phone, email, course_interest, address, note, current_emp["id"]))
-        
-        elif disposition == 'Not interested':
-            cur.execute("""
-                INSERT INTO not_interested (lead_id, name, phone, email, course_interest, address, note, marked_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (lead_id, name, phone, email, course_interest, address, note, current_emp["id"]))
-            cur.execute("UPDATE lead SET status = 'closed' WHERE id = %s", (lead_id,))
-        
-        elif disposition == 'Not reachable':
-            cur.execute("""
-                INSERT INTO not_reachable (lead_id, name, phone, email, course_interest, address, note, marked_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (lead_id, name, phone, email, course_interest, address, note, current_emp["id"]))
-            
+        if disposition == 'Not reachable':
             cur.execute(
                 "SELECT COUNT(*) FROM contact_attempt WHERE lead_id = %s AND disposition = 'Not reachable'",
                 (lead_id,)
             )
             not_reachable_count = cur.fetchone()[0]
             if not_reachable_count >= 3:
-                cur.execute("UPDATE lead SET status = 'parked' WHERE id = %s", (lead_id,))
-        
-        elif disposition == 'Callback':
-            cur.execute("""
-                INSERT INTO callback (lead_id, name, phone, email, course_interest, address, note, marked_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (lead_id, name, phone, email, course_interest, address, note, current_emp["id"]))
+                cur.execute("UPDATE lead SET parked = TRUE WHERE id = %s", (lead_id,))
         
         cur.execute(
             """INSERT INTO audit_log (actor, action, entity, payload)
