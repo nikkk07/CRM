@@ -58,18 +58,18 @@ async def seed_admin():
     """One-off endpoint to create initial admin user in empty DB"""
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM employee WHERE role = 'owner'")
+        cur.execute("SELECT COUNT(*) FROM employee WHERE department = 'Admin'")
         if cur.fetchone()[0] > 0:
             raise HTTPException(status_code=400, detail="Admin already exists")
         
         hashed = hash_password("admin")
         cur.execute("""
             INSERT INTO employee (
-                id, name, phone, email, role, department, permission_level,
+                id, name, phone, email, department,
                 password_hash, date_of_joining, is_active, login_id
             ) VALUES (
                 'EMP001', 'Admin', '+919999999999', 'admin@weoneaviation.in',
-                'owner', 'Admin', 'full_access', %s, CURRENT_DATE, true, 'admin'
+                'Admin', %s, CURRENT_DATE, true, 'admin'
             )
         """, (hashed,))
         conn.commit()
@@ -85,9 +85,7 @@ async def login(req: LoginRequest):
 
 @app.post("/api/auth/employee-login")
 async def employee_login(data: dict):
-    """
-    Employee login using login_id and optional PIN.
-    """
+    """Employee login using login_id and optional PIN."""
     login_id = data.get('login_id', '').strip()
     pin = data.get('pin', '').strip()
     
@@ -98,8 +96,8 @@ async def employee_login(data: dict):
         cur = conn.cursor()
         
         cur.execute("""
-            SELECT id, employee_id, name, phone, email, role, permissions, 
-                   login_pin, permission_level, job_role, active, department
+            SELECT id, employee_id, name, phone, email, 
+                   login_pin, job_role, active, department
             FROM employee
             WHERE active = true AND LOWER(login_id) = LOWER(%s)
             LIMIT 1
@@ -110,22 +108,17 @@ async def employee_login(data: dict):
         if not row:
             raise HTTPException(status_code=401, detail="Employee not found")
         
-        emp_id, emp_employee_id, name, phone, email, role, permissions, login_pin, permission_level, job_role, active, department = row
+        emp_id, emp_employee_id, name, phone, email, login_pin, job_role, active, department = row
         
-        # Check PIN if set
         if login_pin and login_pin != pin:
             raise HTTPException(status_code=401, detail="Invalid PIN")
         
-        # Create employee session
         emp_data = {
             "id": str(emp_id),
             "employee_id": emp_employee_id,
             "name": name,
             "phone": phone,
             "email": email,
-            "role": role,
-            "permissions": permissions,
-            "permission_level": permission_level,
             "department": department,
             "job_role": job_role,
             "is_employee_session": True
@@ -200,15 +193,9 @@ async def ingest_lead_endpoint(data: dict):
 
 @app.get("/api/leads")
 async def get_leads(current_emp = Depends(get_current_employee)):
-    # Access check via permission_level (single source of truth)
-    # Owner/admin always see all
-    if current_emp['role'] in ['admin', 'owner']:
-        pass  # Full access
-    # Employee sessions: check permission_level
-    elif current_emp.get('is_employee_session'):
-        perm_level = current_emp.get('permission_level')
-        if perm_level not in ['full_access', 'sales']:
-            raise HTTPException(status_code=403, detail="Lead access requires full_access or sales permission")
+    # Access: Admin or Sales only
+    if current_emp['department'] not in ['Admin', 'Sales']:
+        raise HTTPException(status_code=403, detail="Lead access requires Admin or Sales department")
     
     with get_db() as conn:
         cur = conn.cursor()
@@ -465,15 +452,9 @@ async def get_quote_pdf(outbox_id: str, current_emp = Depends(get_current_employ
 
 @app.get("/api/outbox")
 async def get_outbox(current_emp = Depends(get_current_employee)):
-    # Access check via permission_level
-    # Owner/admin always see outbox
-    if current_emp['role'] in ['admin', 'owner']:
-        pass
-    # Employee sessions: check permission_level
-    elif current_emp.get('is_employee_session'):
-        perm_level = current_emp.get('permission_level')
-        if perm_level not in ['full_access', 'sales']:
-            raise HTTPException(status_code=403, detail="Outbox access requires full_access or sales permission")
+    # Access: Admin or Sales only
+    if current_emp['department'] not in ['Admin', 'Sales']:
+        raise HTTPException(status_code=403, detail="Outbox access requires Admin or Sales department")
     
     with get_db() as conn:
         cur = conn.cursor()
@@ -598,8 +579,8 @@ async def get_tasks(current_emp = Depends(get_current_employee)):
     with get_db() as conn:
         cur = conn.cursor()
         
-        # Owner/admin always see all tasks
-        if current_emp['role'] in ['admin', 'owner']:
+        # Admin sees all tasks
+        if current_emp['department'] == 'Admin':
             cur.execute("""
                 SELECT t.id, t.title, t.description, t.assigned_to, t.created_by, t.status, 
                        t.due_date, t.created_at, t.finish_date, t.abort_reason,
@@ -609,34 +590,8 @@ async def get_tasks(current_emp = Depends(get_current_employee)):
                 JOIN employee e2 ON t.created_by = e2.id
                 ORDER BY t.created_at DESC
             """)
-        # Employee sessions: permission_level determines access
-        elif current_emp.get('is_employee_session'):
-            perm_level = current_emp.get('permission_level')
-            if perm_level == 'full_access':
-                # full_access sees all tasks
-                cur.execute("""
-                    SELECT t.id, t.title, t.description, t.assigned_to, t.created_by, t.status, 
-                           t.due_date, t.created_at, t.finish_date, t.abort_reason,
-                           e1.name as assignee_name, e2.name as creator_name
-                    FROM task t
-                    LEFT JOIN employee e1 ON t.assigned_to = e1.id
-                    JOIN employee e2 ON t.created_by = e2.id
-                    ORDER BY t.created_at DESC
-                """)
-            else:
-                # sales and regular: only see own tasks
-                cur.execute("""
-                    SELECT t.id, t.title, t.description, t.assigned_to, t.created_by, t.status, 
-                           t.due_date, t.created_at, t.finish_date, t.abort_reason,
-                           e1.name as assignee_name, e2.name as creator_name
-                    FROM task t
-                    LEFT JOIN employee e1 ON t.assigned_to = e1.id
-                    JOIN employee e2 ON t.created_by = e2.id
-                    WHERE t.assigned_to = %s
-                    ORDER BY t.created_at DESC
-                """, (current_emp['id'],))
         else:
-            # Fallback: show all
+            # Sales, IT, Instructor: only see own tasks
             cur.execute("""
                 SELECT t.id, t.title, t.description, t.assigned_to, t.created_by, t.status, 
                        t.due_date, t.created_at, t.finish_date, t.abort_reason,
@@ -644,8 +599,9 @@ async def get_tasks(current_emp = Depends(get_current_employee)):
                 FROM task t
                 LEFT JOIN employee e1 ON t.assigned_to = e1.id
                 JOIN employee e2 ON t.created_by = e2.id
+                WHERE t.assigned_to = %s
                 ORDER BY t.created_at DESC
-            """)
+            """, (current_emp['id'],))
         
         tasks = []
         for r in cur.fetchall():
@@ -664,14 +620,12 @@ async def create_task(data: dict, current_emp = Depends(get_current_employee)):
     with get_db() as conn:
         cur = conn.cursor()
         
-        # Permission check: owner/admin/full_access can create for anyone; others only for self
+        # Permission: Admin can create for anyone; others only for self
         assigned_to = data.get('assigned_to')
-        if current_emp['role'] not in ['admin', 'owner']:
-            perm_level = current_emp.get('permission_level')
-            if perm_level != 'full_access':
-                if assigned_to and assigned_to != current_emp['id']:
-                    raise HTTPException(status_code=403, detail="Can only create tasks for yourself")
-                assigned_to = current_emp['id']
+        if current_emp['department'] != 'Admin':
+            if assigned_to and assigned_to != current_emp['id']:
+                raise HTTPException(status_code=403, detail="Can only create tasks for yourself")
+            assigned_to = current_emp['id']
         
         cur.execute(
             """INSERT INTO task (title, description, assigned_to, created_by, status, due_date)
@@ -687,14 +641,12 @@ async def update_task(task_id: str, data: dict, current_emp = Depends(get_curren
     with get_db() as conn:
         cur = conn.cursor()
         
-        # Owner/admin/full_access can update any task; others can only update their own
-        if current_emp['role'] not in ['admin', 'owner']:
-            perm_level = current_emp.get('permission_level')
-            if perm_level != 'full_access':
-                cur.execute("SELECT assigned_to FROM task WHERE id = %s", (task_id,))
-                row = cur.fetchone()
-                if not row or str(row[0]) != current_emp['id']:
-                    raise HTTPException(status_code=403, detail="Can only update your own tasks")
+        # Admin can update any task; others can only update their own
+        if current_emp['department'] != 'Admin':
+            cur.execute("SELECT assigned_to FROM task WHERE id = %s", (task_id,))
+            row = cur.fetchone()
+            if not row or str(row[0]) != current_emp['id']:
+                raise HTTPException(status_code=403, detail="Can only update your own tasks")
         
         if data.get('status') == 'done':
             cur.execute(
@@ -721,9 +673,9 @@ async def update_task(task_id: str, data: dict, current_emp = Depends(get_curren
             if 'description' in data:
                 fields.append("description = %s")
                 values.append(data['description'])
-            # Only owner/admin/full_access can reassign tasks
+            # Only Admin can reassign tasks
             if 'assigned_to' in data:
-                if current_emp['role'] in ['admin', 'owner'] or current_emp.get('permission_level') == 'full_access':
+                if current_emp['department'] == 'Admin':
                     fields.append("assigned_to = %s")
                     values.append(data['assigned_to'])
             if 'due_date' in data:
@@ -766,11 +718,9 @@ async def add_task_comment(task_id: str, data: dict, current_emp = Depends(get_c
 
 @app.get("/api/employees")
 async def get_employees(current_emp = Depends(get_current_employee)):
-    # Directory access: owner/admin/full_access only
-    if current_emp['role'] not in ['admin', 'owner']:
-        perm_level = current_emp.get('permission_level')
-        if perm_level != 'full_access':
-            raise HTTPException(status_code=403, detail="Employee directory access requires full_access permission")
+    # Directory access: Admin only
+    if current_emp['department'] != 'Admin':
+        raise HTTPException(status_code=403, detail="Employee directory access requires Admin department")
     
     with get_db() as conn:
         cur = conn.cursor()
@@ -794,19 +744,17 @@ async def get_employees(current_emp = Depends(get_current_employee)):
 
 @app.get("/api/employees/{employee_id}")
 async def get_employee_detail(employee_id: str, current_emp = Depends(get_current_employee)):
-    # Owner/admin/full_access can view any employee; others can only view themselves
-    if current_emp['role'] not in ['admin', 'owner']:
-        perm_level = current_emp.get('permission_level')
-        if perm_level != 'full_access':
-            if employee_id != current_emp['id']:
-                raise HTTPException(status_code=403, detail="Can only view your own profile")
+    # Admin can view any employee; others can only view themselves
+    if current_emp['department'] != 'Admin':
+        if employee_id != current_emp['id']:
+            raise HTTPException(status_code=403, detail="Can only view your own profile")
     
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
             SELECT id, employee_id, name, phone, email, job_role, address, 
-                   pay_scale_encrypted, joining_date, status, date_of_leaving, role,
-                   paid_leave_quota, monthly_salary, department, permission_level
+                   pay_scale_encrypted, joining_date, status, date_of_leaving,
+                   paid_leave_quota, monthly_salary, department
             FROM employee
             WHERE id = %s
         """, (employee_id,))
@@ -814,10 +762,10 @@ async def get_employee_detail(employee_id: str, current_emp = Depends(get_curren
         if not row:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        # Decrypt pay_scale ONLY for owner (not full_access)
+        # Decrypt pay_scale ONLY for Admin
         pay_scale = None
         if row[7]:
-            if current_emp['role'] == 'owner':
+            if current_emp['department'] == 'Admin':
                 pay_scale = decrypt_value(row[7])
             else:
                 pay_scale = "••••••"
@@ -902,15 +850,13 @@ async def get_employee_detail(employee_id: str, current_emp = Depends(get_curren
             "joining_date": row[8].isoformat() if row[8] else None,
             "status": row[9] or 'active',
             "date_of_leaving": row[10].isoformat() if row[10] else None,
-            "role": row[11],
-            "paid_leave_quota": row[12] if row[12] else 0,
-            "monthly_salary": float(row[13]) if row[13] else None,
-            "department": row[14],
-            "permission_level": row[15],
+            "paid_leave_quota": row[11] if row[11] else 0,
+            "monthly_salary": float(row[12]) if row[12] else None,
+            "department": row[13],
             "leave_days": leave_days,
             "leave_counts": leave_counts,
             "paid_leave_used": paid_leave_used,
-            "paid_leave_remaining": (row[12] or 0) - paid_leave_used,
+            "paid_leave_remaining": (row[11] or 0) - paid_leave_used,
             "days_in_month": days_in_month if monthly_salary else None,
             "per_day_salary": round(per_day_salary, 2) if monthly_salary else None,
             "deduction_amount": round(deduction_amount, 2) if monthly_salary else None,
@@ -958,9 +904,12 @@ async def update_employee(employee_id: str, data: dict, current_emp = Depends(ge
         if any(key not in allowed_fields for key in data.keys()):
             raise HTTPException(status_code=403, detail="Cannot edit profile fields")
     
-    # Only owner can edit pay_scale
-    if 'pay_scale' in data and current_emp['role'] != 'owner':
-        raise HTTPException(status_code=403, detail="Only owner can edit pay scale")
+    # Only Admin can edit pay_scale and department
+    if 'pay_scale' in data and current_emp['department'] != 'Admin':
+        raise HTTPException(status_code=403, detail="Only Admin can edit pay scale")
+    
+    if 'department' in data and current_emp['department'] != 'Admin':
+        raise HTTPException(status_code=403, detail="Only Admin can change department")
     
     with get_db() as conn:
         cur = conn.cursor()
@@ -971,17 +920,10 @@ async def update_employee(employee_id: str, data: dict, current_emp = Depends(ge
             'employee_id': 'employee_id', 'name': 'name', 'phone': 'phone',
             'email': 'email', 'job_role': 'job_role', 'address': 'address',
             'joining_date': 'joining_date', 'status': 'status', 
-            'date_of_leaving': 'date_of_leaving', 'role': 'role',
-            'can_access_leads': 'can_access_leads', 'login_pin': 'login_pin',
+            'date_of_leaving': 'date_of_leaving', 'login_pin': 'login_pin',
             'paid_leave_quota': 'paid_leave_quota', 'monthly_salary': 'monthly_salary',
-            'department': 'department'
+            'department': 'department', 'login_id': 'login_id'
         }
-        
-        # Only owner can set permission_level (not full_access)
-        if 'permission_level' in data:
-            if current_emp['role'] != 'owner':
-                raise HTTPException(status_code=403, detail="Only owner can change permission level")
-            field_map['permission_level'] = 'permission_level'
         
         for key, col in field_map.items():
             if key in data:
@@ -1001,8 +943,8 @@ async def update_employee(employee_id: str, data: dict, current_emp = Depends(ge
 
 @app.post("/api/employees/{employee_id}/leave")
 async def mark_leave_day(employee_id: str, data: dict, current_emp = Depends(get_current_employee)):
-    # Admins can mark anyone's leave; employees can mark their own
-    if current_emp['role'] not in ['admin', 'owner']:
+    # Admin can mark anyone's leave; employees can mark their own
+    if current_emp['department'] != 'Admin':
         if employee_id != current_emp['id']:
             raise HTTPException(status_code=403, detail="Can only mark your own leave")
     
@@ -1065,8 +1007,8 @@ async def mark_leave_day(employee_id: str, data: dict, current_emp = Depends(get
 
 @app.delete("/api/employees/{employee_id}/leave/{leave_date}")
 async def unmark_leave_day(employee_id: str, leave_date: str, current_emp = Depends(get_current_employee)):
-    # Admins can unmark anyone's leave; employees can unmark their own
-    if current_emp['role'] not in ['admin', 'owner']:
+    # Admin can unmark anyone's leave; employees can unmark their own
+    if current_emp['department'] != 'Admin':
         if employee_id != current_emp['id']:
             raise HTTPException(status_code=403, detail="Can only unmark your own leave")
     
@@ -1081,8 +1023,8 @@ async def unmark_leave_day(employee_id: str, leave_date: str, current_emp = Depe
 @app.get("/api/employees/{employee_id}/salary-report/{year}/{month}")
 async def get_monthly_salary_report(employee_id: str, year: int, month: int, current_emp = Depends(get_current_employee)):
     """Calculate monthly salary with leave deductions"""
-    # Only admin or employee themselves can view
-    if current_emp['role'] not in ['admin', 'owner']:
+    # Only Admin or employee themselves can view
+    if current_emp['department'] != 'Admin':
         if employee_id != current_emp['id']:
             raise HTTPException(status_code=403, detail="Can only view your own salary report")
     
@@ -1176,8 +1118,8 @@ async def get_monthly_salary_report(employee_id: str, year: int, month: int, cur
 
 @app.get("/api/salary-reports/{year}/{month}")
 async def get_all_salary_reports(year: int, month: int, current_emp = Depends(get_current_employee)):
-    """Get all employees' salary reports for a given month (admin only)"""
-    if current_emp['role'] not in ['admin', 'owner']:
+    """Get all employees' salary reports for a given month (Admin only)"""
+    if current_emp['department'] != 'Admin':
         raise HTTPException(status_code=403, detail="Admin access required")
     
     with get_db() as conn:

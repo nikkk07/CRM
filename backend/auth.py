@@ -30,7 +30,7 @@ def get_employee_by_login_id(login_id: str):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, name, phone, email, role, permissions, active, password_hash, login_id FROM employee WHERE LOWER(login_id) = LOWER(%s) AND active = true",
+            "SELECT id, name, phone, email, department, active, password_hash, login_id FROM employee WHERE LOWER(login_id) = LOWER(%s) AND active = true",
             (login_id,)
         )
         row = cur.fetchone()
@@ -41,11 +41,10 @@ def get_employee_by_login_id(login_id: str):
             "name": row[1],
             "phone": row[2],
             "email": row[3],
-            "role": row[4],
-            "permissions": row[5],
-            "active": row[6],
-            "password_hash": row[7],
-            "login_id": row[8]
+            "department": row[4],
+            "active": row[5],
+            "password_hash": row[6],
+            "login_id": row[7]
         }
 
 def authenticate_employee(login_id: str, password: str):
@@ -72,7 +71,7 @@ async def get_current_employee(credentials: HTTPAuthorizationCredentials = Depen
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, name, phone, email, role, permissions, active FROM employee WHERE id = %s AND active = true",
+            "SELECT id, name, phone, email, department, active FROM employee WHERE id = %s AND active = true",
             (emp_id,)
         )
         row = cur.fetchone()
@@ -83,7 +82,6 @@ async def get_current_employee(credentials: HTTPAuthorizationCredentials = Depen
             "name": row[1],
             "phone": row[2],
             "email": row[3],
-            "role": row[4],
-            "permissions": row[5],
-            "active": row[6]
+            "department": row[4],
+            "active": row[5]
         }
