@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "attendance",
-      "runtimeExecutable": "./venv/bin/python",
-      "runtimeArgs": ["run.py"],
+      "runtimeExecutable": "./attendance/.venv/bin/python",
+      "runtimeArgs": ["attendance/run.py"],
       "port": 8100
     }
   ]

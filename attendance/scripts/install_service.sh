@@ -12,7 +12,7 @@ launchctl unload "$PLIST_DST" 2>/dev/null || true
 launchctl load "$PLIST_DST"
 
 echo "✅ Service installed and started."
-echo "   Dashboard:  http://localhost:8000  (or http://<this-mac-ip>:8000 from your phone)"
+echo "   Dashboard:  http://localhost:8100  (or http://<this-mac-ip>:8100 from your phone)"
 echo "   Logs:       $PROJECT/data/logs/"
 echo ""
 echo "To stop:    launchctl unload $PLIST_DST"

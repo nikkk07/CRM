@@ -1,18 +1,25 @@
-# --- secrets: NEVER commit ---
+# ===== secrets: NEVER commit =====
 .env
+*.env
+!.env.example
 CRM/backend/.env
 
-# --- python ---
+# ===== python =====
+.venv/
 venv/
 __pycache__/
 *.pyc
+*.pyo
 
-# --- runtime data: attendance DB, face photos, logs ---
-data/
+# ===== attendance runtime data (DB, face photos, logs, session secret) =====
+attendance/data/
 
-# --- node ---
+# ===== node / vite =====
 node_modules/
+dist/
 CRM/frontend/dist/
+.vite/
 
-# --- os / editor ---
+# ===== os / editor =====
 .DS_Store
+*.log

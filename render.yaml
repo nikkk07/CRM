@@ -1,0 +1,35 @@
+# Render Blueprint for the We One Aviation CRM backend.
+# Render reads this file from the repo root. On the Render dashboard you can
+# either connect this Blueprint, or configure the service manually with the
+# same settings shown here (Root Directory = CRM/backend).
+services:
+  - type: web
+    name: crm-weoneaviation
+    runtime: python
+    rootDir: CRM/backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # Set the actual values in the Render dashboard (never commit them).
+      - key: DATABASE_URL            # Supabase Postgres connection string
+        sync: false
+      - key: SECRET_KEY              # JWT signing secret
+        sync: false
+      - key: ENCRYPTION_KEY          # 32-byte key for field encryption
+        sync: false
+      - key: ATTENDANCE_INGEST_TOKEN # must match attendance/.env CRM_WEBHOOK_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MONGODB_ATLAS_URI
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
