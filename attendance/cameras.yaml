@@ -1,16 +1,33 @@
-# List every camera the software should watch.
-# "channel" is the camera number on your CP Plus DVR (1, 2, 3, 4...).
-# Give each one a friendly name — the entrance camera matters most.
+# Cameras the attendance system watches on the CP Plus DVR (192.168.1.7).
+# "channel" = the camera number on the DVR. Rename these to match how your
+# staff actually refer to each area — the names appear on the dashboard.
+#
+# All 8 channels are live 4MP (2304x1296). Channel 8 (rooftop street view) is
+# deliberately left out: faces there are far too small to identify, so watching
+# it would only waste CPU. Add it back if that camera is ever repointed.
+
 cameras:
-  - name: Main Entrance
-    channel: 1
-  - name: Reception
+  - name: Entrance Walkway     # CH2 — main way in; primary entry detection
     channel: 2
-  - name: Classroom
+
+  - name: Reception            # CH1
+    channel: 1
+
+  - name: Staircase            # CH5 — chokepoint between floors
+    channel: 5
+
+  - name: Staff Office         # CH6
+    channel: 6
+
+  - name: Cabin                # CH7
+    channel: 7
+
+  - name: Classroom            # CH3
     channel: 3
-  - name: Corridor
+
+  - name: Parking Passage      # CH4
     channel: 4
 
-# Advanced: if a camera needs a custom address, use "url" instead of "channel":
+# Advanced: a camera with a non-standard address can use "url" instead:
 #  - name: Special Camera
 #    url: rtsp://user:pass@192.168.1.50:554/stream1
