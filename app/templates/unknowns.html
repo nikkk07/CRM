@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Unknown faces</h1>
+<p class="mut">People the cameras saw but didn't recognize. Enroll them here, or clear the list.
+  <form class="inline" method="post" action="/unknowns/clear" onsubmit="return confirm('Delete all unknown snapshots?')"><button class="btn small danger">Clear all</button></form>
+</p>
+<div class="grid" style="margin-top:14px">
+  {% for f in items %}
+  <div class="tile">
+    <img src="/data/unknowns/{{ f }}">
+    <div class="t">{{ f[9:11] }}:{{ f[11:13] }}:{{ f[13:15] }} · {{ f[:4] }}-{{ f[4:6] }}-{{ f[6:8] }}</div>
+    <form method="post" action="/unknowns/enroll">
+      <input type="hidden" name="filename" value="{{ f }}">
+      <select name="person_id" style="width:100%;margin-bottom:6px">
+        <option value="">— New person —</option>
+        {% for p in people %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      </select>
+      <input name="new_name" placeholder="Name (if new)" style="width:100%;margin-bottom:6px">
+      <select name="new_role" style="width:100%;margin-bottom:6px"><option value="student">Student</option><option value="staff">Staff</option></select>
+      <button class="btn small" style="width:100%">Enroll</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% if not items %}<p class="mut">Nothing here — every face seen recently was recognized.</p>{% endif %}
+{% endblock %}

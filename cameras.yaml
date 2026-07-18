@@ -1,0 +1,16 @@
+# List every camera the software should watch.
+# "channel" is the camera number on your CP Plus DVR (1, 2, 3, 4...).
+# Give each one a friendly name — the entrance camera matters most.
+cameras:
+  - name: Main Entrance
+    channel: 1
+  - name: Reception
+    channel: 2
+  - name: Classroom
+    channel: 3
+  - name: Corridor
+    channel: 4
+
+# Advanced: if a camera needs a custom address, use "url" instead of "channel":
+#  - name: Special Camera
+#    url: rtsp://user:pass@192.168.1.50:554/stream1

@@ -1,0 +1,62 @@
+Phase 4 — COMPLETE with fixes
+
+PRICING UPDATED:
+✓ CPL base fee: ₹2,95,000 (real price)
+✓ Discount field added to course table (discount_percent)
+✓ Quote PDF shows discount line if > 0%
+✓ Frontend: discount input in QuoteGenerator (0-100%)
+✓ Discount applied per-quote based on personal request/performance
+
+QUOTE PDF URL:
+Current: http://localhost:8000/static/quotes/{filename}
+- Served from backend/static/quotes/
+- For phone access, need either:
+  1. Deploy to weoneaviation.in domain (production)
+  2. Expose Mac Mini LAN IP (e.g., http://192.168.1.x:8000/static/quotes/...)
+  3. Use ngrok/cloudflare tunnel for temporary public URL
+
+VERIFICATION STEPS NEEDED (by you):
+1. Install Ollama:
+   brew install ollama
+   ollama pull llama3.2:3b-instruct-q4_K_M
+   ollama pull nomic-embed-text
+   ollama serve
+
+2. Test Lead Opener (offline safety check):
+   - Disconnect from internet
+   - Open lead detail → "AI Draft Opener"
+   - Should generate via local Ollama only
+   - Draft goes to Outbox with status=draft
+
+3. Load real DGCA docs:
+   - Login to CRM → Policy Docs tab
+   - Upload .txt/.md files with DGCA circulars
+   - Each upload auto-generates embeddings
+
+4. Test Policy Q&A:
+   - Click "Policy Q&A" button
+   - Ask DGCA regulation question
+   - Should cite source docs with similarity scores
+
+5. Test Quote with Discount:
+   - Open lead → Generate Quote
+   - Select CPL course
+   - Enter discount % (e.g., 10 for performance)
+   - PDF shows: Base ₹2,95,000, Discount -₹29,500, Total ₹2,65,500
+
+6. Verify PDF on phone:
+   - Get your Mac Mini LAN IP: ifconfig | grep "inet "
+   - Access from phone: http://<mac-ip>:8000/static/quotes/quote_XXXXX.pdf
+   - Or setup public domain/tunnel
+
+CURRENT STATUS:
+✓ Backend running on port 8000
+✓ Frontend running on port 3000
+✓ CPL fee updated to real price
+✓ Discount support added
+✓ AI agents code complete
+✗ Ollama not verified (you must install)
+✗ DGCA docs not loaded (you must upload)
+✗ Public URL not configured (you must deploy/expose)
+
+Login: +919999999999 / admin123

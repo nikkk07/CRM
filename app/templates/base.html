@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>We One Aviation — Attendance</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">✈️ <strong>We One Aviation</strong> · AI Attendance</div>
+  <nav>
+    <a href="/" {% if request.url.path == '/' %}class="active"{% endif %}>Today</a>
+    <a href="/history" {% if request.url.path == '/history' %}class="active"{% endif %}>History</a>
+    <a href="/people" {% if request.url.path == '/people' %}class="active"{% endif %}>People</a>
+    <a href="/unknowns" {% if request.url.path == '/unknowns' %}class="active"{% endif %}>Unknown Faces</a>
+    <a href="/settings" {% if request.url.path == '/settings' %}class="active"{% endif %}>Settings</a>
+    <span class="userbox">👤 {{ request.state.user.name if request.state.user else '' }} · <a href="/logout">Logout</a></span>
+  </nav>
+</header>
+<div class="cambar">
+  {% if not cameras_configured %}
+    <span class="pill warn">⚠ Cameras not configured yet — fill in .env and cameras.yaml, then restart</span>
+  {% else %}
+    {% for name, st in cameras.items() %}
+      <span class="pill {{ 'ok' if st.connected else 'bad' }}">
+        {{ '🟢' if st.connected else '🔴' }} {{ name }}{% if st.last_frame %} · {{ st.last_frame }}{% endif %}
+      </span>
+    {% endfor %}
+  {% endif %}
+</div>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer>Runs 100% locally on this Mac · Sundays &amp; holidays are skipped automatically</footer>
+</body>
+</html>

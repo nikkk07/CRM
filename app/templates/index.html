@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Today · {{ today }} {% if not working_day %}<span class="tag out">Sunday / Holiday — attendance paused</span>{% endif %}</h1>
+
+<div class="cards">
+  <div class="card"><div class="num">{{ inside_count }}</div><div class="lbl">Currently inside</div></div>
+  <div class="card"><div class="num">{{ rows|length }}</div><div class="lbl">Marked present today</div></div>
+  <div class="card"><div class="num">{{ absent|length }}</div><div class="lbl">Absent so far</div></div>
+  <div class="card"><div class="num">{{ total_people }}</div><div class="lbl">Enrolled people</div></div>
+</div>
+
+<h2>Attendance log</h2>
+{% if rows %}
+<div style="overflow-x:auto">
+<table>
+  <tr><th>Photo</th><th>Name</th><th>Role</th><th>Entry</th><th>Last seen</th><th>Exit</th><th>Status</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{% if r.entry_snapshot %}<img class="face" src="/data/{{ r.entry_snapshot }}">{% endif %}</td>
+    <td>{{ r.name }}</td>
+    <td><span class="tag {{ r.role }}">{{ r.role }}</span></td>
+    <td>{{ r.entry_time }}</td>
+    <td class="mut">{{ (r.last_ts or '')[11:19] }}</td>
+    <td>{{ r.exit_time or '—' }}</td>
+    <td>{% if r.exit_time %}<span class="tag out">Left</span>{% else %}<span class="tag in">Inside</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% else %}
+<p class="mut">No attendance yet today.</p>
+{% endif %}
+
+{% if absent %}
+<h2>Not yet arrived</h2>
+<p>{% for p in absent %}<span class="tag {{ p.role }}">{{ p.name }}</span> {% endfor %}</p>
+{% endif %}
+
+<h2>AI daily report {% if not report %}<form class="inline" method="post" action="/report/generate"><button class="btn small sec">Generate now</button></form>{% endif %}</h2>
+{% if report %}<div class="report">{{ report.text }}</div>{% else %}<p class="mut">Generated automatically every evening (needs Groq key).</p>{% endif %}
+
+<script>setTimeout(()=>location.reload(), 30000)</script>
+{% endblock %}

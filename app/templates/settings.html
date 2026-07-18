@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Settings</h1>
+
+<div class="cards">
+  <div class="card"><div class="num">{{ exit_minutes }} min</div><div class="lbl">Off-camera time before exit is marked</div></div>
+  <div class="card"><div class="num">{{ threshold }}</div><div class="lbl">Face match strictness (0–1)</div></div>
+  <div class="card"><div class="num">{{ '✅' if groq else '—' }}</div><div class="lbl">Groq AI reports</div></div>
+  <div class="card"><div class="num">{{ '✅' if r2 else '—' }}</div><div class="lbl">Cloudflare R2 backup</div></div>
+  <div class="card"><div class="num">{{ '✅' if crm else '—' }}</div><div class="lbl">CRM auto-sync</div></div>
+</div>
+<p class="mut">These values are set in the <code>.env</code> file (restart the service after changing them).</p>
+
+<h2>Holidays (attendance is skipped)</h2>
+<form method="post" action="/holidays/add" class="formrow">
+  <div><label>Date</label><input type="date" name="date" required></div>
+  <div><label>Name</label><input name="name" placeholder="e.g. Diwali"></div>
+  <div><button class="btn">Add holiday</button></div>
+</form>
+<table style="max-width:480px">
+  <tr><th>Date</th><th>Name</th><th></th></tr>
+  {% for h in holidays %}
+  <tr><td>{{ h.date }}</td><td>{{ h.name }}</td>
+      <td><form class="inline" method="post" action="/holidays/delete"><input type="hidden" name="date" value="{{ h.date }}"><button class="btn small danger">Remove</button></form></td></tr>
+  {% endfor %}
+</table>
+{% if not holidays %}<p class="mut" style="margin-top:10px">No holidays added yet. Sundays are always skipped.</p>{% endif %}
+{% endblock %}

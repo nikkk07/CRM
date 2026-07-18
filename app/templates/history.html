@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>History</h1>
+<form method="get" class="formrow">
+  <div><label>From</label><input type="date" name="date_from" value="{{ date_from }}"></div>
+  <div><label>To</label><input type="date" name="date_to" value="{{ date_to }}"></div>
+  <div><label>Person</label><select name="person"><option value="">Everyone</option>
+    {% for p in people %}<option value="{{ p.id }}" {% if person == p.id|string %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+  </select></div>
+  <div><button class="btn">Filter</button>
+       <a class="btn sec" href="/export.xlsx?date_from={{ date_from }}&date_to={{ date_to }}&person={{ person }}">⬇ Excel export</a></div>
+</form>
+<div style="overflow-x:auto">
+<table>
+  <tr><th>Date</th><th>Name</th><th>Role</th><th>Entry</th><th>Exit</th><th>Entry photo</th><th>Exit photo</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.date }}</td>
+    <td>{{ r.name }}</td>
+    <td><span class="tag {{ r.role }}">{{ r.role }}</span></td>
+    <td>{{ r.entry_time }}</td>
+    <td>{{ r.exit_time or '—' }}</td>
+    <td>{% if r.entry_snapshot %}<img class="face" src="/data/{{ r.entry_snapshot }}">{% endif %}</td>
+    <td>{% if r.exit_snapshot %}<img class="face" src="/data/{{ r.exit_snapshot }}">{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% if not rows %}<p class="mut" style="margin-top:12px">No records in this range.</p>{% endif %}
+{% endblock %}

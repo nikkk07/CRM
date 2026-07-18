@@ -1,0 +1,18 @@
+# --- secrets: NEVER commit ---
+.env
+CRM/backend/.env
+
+# --- python ---
+venv/
+__pycache__/
+*.pyc
+
+# --- runtime data: attendance DB, face photos, logs ---
+data/
+
+# --- node ---
+node_modules/
+CRM/frontend/dist/
+
+# --- os / editor ---
+.DS_Store

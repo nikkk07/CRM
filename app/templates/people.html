@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>People</h1>
+{% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+{% if err %}<div class="err">{{ err }}</div>{% endif %}
+
+<h2>Enroll a new person</h2>
+<form method="post" action="/people/add" enctype="multipart/form-data" class="formrow">
+  <div><label>Full name</label><input name="name" required placeholder="e.g. Rahul Sharma"></div>
+  <div><label>Role</label><select name="role"><option value="student">Student</option><option value="staff">Staff</option></select></div>
+  <div><label>CRM ID (optional)</label><input name="crm_id" placeholder="ID in your CRM"></div>
+  <div><label>Face photo(s) — clear &amp; front-facing</label><input type="file" name="photos" accept="image/*" multiple required></div>
+  <div><button class="btn">Add person</button></div>
+</form>
+<p class="mut">Tip: 2–3 photos per person (different angles/lighting) makes recognition more reliable.</p>
+
+<h2>Enrolled ({{ people|length }})</h2>
+<div style="overflow-x:auto">
+<table>
+  <tr><th>Photo</th><th>Name</th><th>Role</th><th>CRM ID</th><th>Face photos</th><th>Status</th><th>Actions</th></tr>
+  {% for p in people %}
+  <tr>
+    <td>{% if p.photo %}<img class="face" src="/data/{{ p.photo }}">{% endif %}</td>
+    <td>{{ p.name }}</td>
+    <td><span class="tag {{ p.role }}">{{ p.role }}</span></td>
+    <td class="mut">{{ p.crm_id }}</td>
+    <td>{{ p.n_faces }}</td>
+    <td>{% if p.active %}<span class="tag in">Active</span>{% else %}<span class="tag out">Paused</span>{% endif %}</td>
+    <td>
+      <form class="inline" method="post" action="/people/{{ p.id }}/photo" enctype="multipart/form-data">
+        <input type="file" name="photos" accept="image/*" multiple style="width:170px" onchange="this.form.submit()">
+      </form>
+      <form class="inline" method="post" action="/people/{{ p.id }}/toggle"><button class="btn small sec">{{ 'Pause' if p.active else 'Resume' }}</button></form>
+      <form class="inline" method="post" action="/people/{{ p.id }}/delete" onsubmit="return confirm('Delete {{ p.name }} and all their face data?')"><button class="btn small danger">Delete</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

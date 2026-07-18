@@ -1,0 +1,13 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+jinja2>=3.1
+python-multipart>=0.0.9
+opencv-python>=4.9
+numpy>=1.26,<3
+onnxruntime>=1.17
+insightface>=0.7.3
+boto3>=1.34
+requests>=2.31
+openpyxl>=3.1
+python-dotenv>=1.0
+PyYAML>=6.0
