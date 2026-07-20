@@ -97,6 +97,7 @@ def logout():
 def startup():
     global RECOGNIZER
     db.init()
+    db.normalize_roles()  # legacy 'staff' -> 'employee' (idempotent)
     from .recognition import Recognizer
     RECOGNIZER = Recognizer()
     cams = config.load_cameras()
@@ -107,7 +108,7 @@ def startup():
     attendance.ExitChecker().start()
     r2.start()
     crm.start()
-    reports.start()
+    reports.start(RECOGNIZER)
     log.info("Startup complete: %d cameras", len(cams))
 
 

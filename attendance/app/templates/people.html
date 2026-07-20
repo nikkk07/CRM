@@ -7,7 +7,7 @@
 <h2>Enroll a new person</h2>
 <form method="post" action="/people/add" enctype="multipart/form-data" class="formrow">
   <div><label>Full name</label><input name="name" required placeholder="e.g. Rahul Sharma"></div>
-  <div><label>Role</label><select name="role"><option value="student">Student</option><option value="staff">Staff</option></select></div>
+  <div><label>Role</label><select name="role"><option value="student">Student</option><option value="employee">Employee</option></select></div>
   <div><label>CRM ID (optional)</label><input name="crm_id" placeholder="ID in your CRM"></div>
   <div><label>Face photo(s) — clear &amp; front-facing</label><input type="file" name="photos" accept="image/*" multiple required></div>
   <div><button class="btn">Add person</button></div>
@@ -22,7 +22,7 @@
   <tr>
     <td>{% if p.photo %}<img class="face" src="/data/{{ p.photo }}">{% endif %}</td>
     <td>{{ p.name }}</td>
-    <td><span class="tag {{ p.role }}">{{ p.role }}</span></td>
+    <td><span class="tag {{ p.role }}">{{ p.role|capitalize }}</span></td>
     <td class="mut">{{ p.crm_id }}</td>
     <td>{{ p.n_faces }}</td>
     <td>{% if p.active %}<span class="tag in">Active</span>{% else %}<span class="tag out">Paused</span>{% endif %}</td>

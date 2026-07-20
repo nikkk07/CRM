@@ -4,17 +4,22 @@ import logging
 import os
 import time
 from datetime import datetime
-from threading import Thread
+from threading import Lock, Thread
 
 os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
 import cv2  # noqa: E402  (env var must be set before import)
+import numpy as np  # noqa: E402
 
-from . import config, recognition
+from . import config, db, recognition
 
 log = logging.getLogger("camera")
 
 # Live status shown on the dashboard: {camera_name: {...}}
 STATUS: dict = {}
+
+# Global lock shared by ALL camera threads so a brand-new face is turned into
+# exactly one visitor even if two cameras see it in the same ~1s window.
+_visitor_lock = Lock()
 
 
 class CameraWorker(Thread):
@@ -70,8 +75,44 @@ class CameraWorker(Thread):
             if pid is not None:
                 STATUS[self.cam_name]["faces_seen"] += 1
                 self.on_sighting(pid, score, self.cam_name, frame, face.bbox)
+            elif config.VISITOR_TRACKING:
+                self._track_visitor(frame, face, score)
             elif score < config.UNKNOWN_THRESHOLD and face.det_score >= 0.65:
                 self._save_unknown(frame, face.bbox)
+
+    def _track_visitor(self, frame, face, score):
+        """Turn an unrecognized face into a tracked 'visitor' (role='visitor'),
+        reusing the normal attendance pipeline. Falls back to the unknown gallery
+        for low-quality faces so junk never becomes a visitor."""
+        face_h = face.bbox[3] - face.bbox[1]
+        # 1) Quality gate BEFORE creating a visitor.
+        if face_h < config.VISITOR_MIN_FACE_PX or face.det_score < config.VISITOR_MIN_DET_SCORE:
+            if score < config.UNKNOWN_THRESHOLD and face.det_score >= 0.65:
+                self._save_unknown(frame, face.bbox)
+            return
+        # 2) Dead-zone: only create when clearly new. A score in the ambiguous
+        #    band [VISITOR_NEW_THRESHOLD, MATCH_THRESHOLD) is skipped entirely to
+        #    avoid splitting one person into many visitors.
+        if score >= config.VISITOR_NEW_THRESHOLD:
+            return
+        embedding = face.normed_embedding
+        with _visitor_lock:
+            # Double-check under the lock: another camera/frame may have just
+            # created this visitor in the last instant.
+            pid, score2 = self.recognizer.match(embedding)
+            if pid is not None:
+                STATUS[self.cam_name]["faces_seen"] += 1
+                self.on_sighting(pid, score2, self.cam_name, frame, face.bbox)
+                return
+            n = db.count_visitors_on(db.today_str()) + 1
+            new_pid = db.add_person(name=f"Visitor {n}", role="visitor", crm_id="")
+            db.add_face(new_pid, embedding.astype(np.float32).tobytes(), f"visitor:{self.cam_name}")
+            # Reload so the very next frame MATCHES this visitor, not re-creates one.
+            self.recognizer.reload()
+        log.info("[%s] NEW VISITOR 'Visitor %d' (person %s) [best prior score %.2f]",
+                 self.cam_name, n, new_pid, score)
+        STATUS[self.cam_name]["faces_seen"] += 1
+        self.on_sighting(new_pid, score, self.cam_name, frame, face.bbox)
 
     def _save_unknown(self, frame, bbox):
         """Keep a rate-limited gallery of unrecognized faces so they can be enrolled."""

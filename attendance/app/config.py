@@ -31,6 +31,16 @@ UNKNOWN_THRESHOLD = float(env("UNKNOWN_THRESHOLD", 0.35))   # below this = clear
 PROCESS_EVERY_SEC = float(env("PROCESS_EVERY_SEC", 1.0))    # analyze 1 frame per camera per N seconds
 MIN_FACE_HEIGHT = int(env("MIN_FACE_HEIGHT", 60))           # px; ignore faces too small to trust
 
+# --- Visitor tracking (unknown faces auto-enrolled as anonymous visitors) ---
+# When enabled, an unrecognized face gets full per-visitor entry/exit tracking
+# under role='visitor'. Their biometrics (embeddings + face images) auto-delete
+# after VISITOR_RETENTION_DAYS; the anonymized "Visitor N" log is retained.
+VISITOR_TRACKING = env("VISITOR_TRACKING", "true").lower() in ("1", "true", "yes", "on")
+VISITOR_MIN_FACE_PX = int(env("VISITOR_MIN_FACE_PX", 90))       # min face height to auto-enroll
+VISITOR_MIN_DET_SCORE = float(env("VISITOR_MIN_DET_SCORE", 0.66))  # min detector confidence
+VISITOR_NEW_THRESHOLD = float(env("VISITOR_NEW_THRESHOLD", 0.32))  # create only when best score is below this
+VISITOR_RETENTION_DAYS = int(env("VISITOR_RETENTION_DAYS", 7))  # days to keep visitor biometrics
+
 # --- Web ---
 PORT = int(env("PORT", 8100))  # 8000 is used by the CRM backend
 

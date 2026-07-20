@@ -86,6 +86,22 @@ def get_person(pid):
         return c.execute("SELECT * FROM people WHERE id=?", (pid,)).fetchone()
 
 
+def normalize_roles():
+    """One-time idempotent standardization: legacy 'staff' -> 'employee'.
+    Canonical roles are 'student' | 'employee' | 'visitor'."""
+    with conn() as c:
+        c.execute("UPDATE people SET role='employee' WHERE role='staff'")
+
+
+def count_visitors_on(date):
+    """How many visitors have been created on a given YYYY-MM-DD (for 'Visitor N')."""
+    with conn() as c:
+        return c.execute(
+            "SELECT COUNT(*) FROM people WHERE role='visitor' AND substr(created_at,1,10)=?",
+            (date,),
+        ).fetchone()[0]
+
+
 def list_people(active_only=False):
     q = "SELECT p.*, (SELECT COUNT(*) FROM faces f WHERE f.person_id=p.id) AS n_faces FROM people p"
     if active_only:
@@ -121,6 +137,47 @@ def all_faces():
             "SELECT f.person_id, f.embedding FROM faces f "
             "JOIN people p ON p.id=f.person_id WHERE p.active=1"
         ).fetchall()
+
+
+# ---------- visitor biometric retention ----------
+
+def expired_visitors(cutoff_iso):
+    """Visitors created before cutoff_iso that still hold biometric data.
+    The EXISTS clause skips ones already purged so the job is idempotent."""
+    with conn() as c:
+        return c.execute(
+            "SELECT id FROM people WHERE role='visitor' AND created_at IS NOT NULL "
+            "AND created_at < ? "
+            "AND EXISTS(SELECT 1 FROM faces f WHERE f.person_id=people.id)",
+            (cutoff_iso,),
+        ).fetchall()
+
+
+def visitor_snapshot_paths(pid):
+    """All face-image paths (relative to DATA_DIR) tied to a visitor."""
+    paths = set()
+    with conn() as c:
+        for r in c.execute(
+            "SELECT entry_snapshot, exit_snapshot FROM attendance WHERE person_id=?", (pid,)
+        ):
+            paths.add(r["entry_snapshot"])
+            paths.add(r["exit_snapshot"])
+        ls = c.execute("SELECT snapshot FROM last_seen WHERE person_id=?", (pid,)).fetchone()
+        if ls:
+            paths.add(ls["snapshot"])
+        p = c.execute("SELECT photo FROM people WHERE id=?", (pid,)).fetchone()
+        if p:
+            paths.add(p["photo"])
+    return [x for x in paths if x]
+
+
+def purge_visitor_biometrics(pid):
+    """Delete a visitor's biometrics (embeddings + last_seen) but KEEP their
+    attendance rows so the anonymized 'Visitor N' log survives. Mark inactive."""
+    with conn() as c:
+        c.execute("DELETE FROM faces WHERE person_id=?", (pid,))
+        c.execute("DELETE FROM last_seen WHERE person_id=?", (pid,))
+        c.execute("UPDATE people SET active=0, photo='' WHERE id=?", (pid,))
 
 
 # ---------- attendance ----------

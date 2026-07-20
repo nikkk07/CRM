@@ -15,6 +15,33 @@ def enabled() -> bool:
                 config.R2_SECRET_ACCESS_KEY, config.R2_BUCKET])
 
 
+def _build_client():
+    import boto3
+    return boto3.client(
+        "s3",
+        endpoint_url=f"https://{config.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+        aws_access_key_id=config.R2_ACCESS_KEY_ID,
+        aws_secret_access_key=config.R2_SECRET_ACCESS_KEY,
+        region_name="auto",
+    )
+
+
+_del_client = None
+
+
+def delete(rel_path: str):
+    """Best-effort removal of a backed-up object; silent if R2 isn't configured."""
+    global _del_client
+    if not enabled():
+        return
+    try:
+        if _del_client is None:
+            _del_client = _build_client()
+        _del_client.delete_object(Bucket=config.R2_BUCKET, Key=rel_path)
+    except Exception as e:
+        log.warning("R2 delete failed for %s: %s", rel_path, e)
+
+
 def enqueue(rel_path: str):
     """rel_path is relative to the data/ directory."""
     if not enabled():
@@ -28,14 +55,7 @@ def enqueue(rel_path: str):
 class Uploader(Thread):
     def __init__(self):
         super().__init__(daemon=True, name="r2-uploader")
-        import boto3
-        self.client = boto3.client(
-            "s3",
-            endpoint_url=f"https://{config.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
-            aws_access_key_id=config.R2_ACCESS_KEY_ID,
-            aws_secret_access_key=config.R2_SECRET_ACCESS_KEY,
-            region_name="auto",
-        )
+        self.client = _build_client()
 
     def run(self):
         log.info("R2 backup enabled -> bucket %s", config.R2_BUCKET)

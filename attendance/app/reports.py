@@ -7,7 +7,7 @@ from threading import Thread
 
 import requests
 
-from . import config, db
+from . import config, db, purge
 
 log = logging.getLogger("reports")
 
@@ -57,23 +57,33 @@ def generate(date: str) -> str | None:
 
 
 class Scheduler(Thread):
-    """Fires once per day at REPORT_HOUR."""
+    """Fires once per day at REPORT_HOUR: writes the AI report (if Groq is
+    configured) and runs the visitor biometric retention purge."""
 
-    def __init__(self):
+    def __init__(self, recognizer=None):
         super().__init__(daemon=True, name="report-scheduler")
+        self.recognizer = recognizer
+        self._purged_on = None  # date the purge last ran, so it fires once a day
 
     def run(self):
         while True:
             now = datetime.now()
-            if now.hour == config.REPORT_HOUR and now.weekday() != 6:
-                date = now.strftime("%Y-%m-%d")
-                if db.get_report(date) is None:
+            date = now.strftime("%Y-%m-%d")
+            if now.hour == config.REPORT_HOUR:
+                if config.GROQ_API_KEY and now.weekday() != 6 and db.get_report(date) is None:
                     generate(date)
+                if self._purged_on != date:
+                    self._purged_on = date
+                    try:
+                        purge.purge_expired_visitors(self.recognizer)
+                    except Exception:
+                        log.exception("visitor purge failed")
             time.sleep(300)
 
 
-def start():
-    if config.GROQ_API_KEY:
-        Scheduler().start()
-    else:
-        log.info("GROQ_API_KEY not set - daily AI reports disabled")
+def start(recognizer=None):
+    # The scheduler always runs (it drives the daily visitor purge); the AI
+    # report step inside it is simply skipped when Groq isn't configured.
+    if not config.GROQ_API_KEY:
+        log.info("GROQ_API_KEY not set - daily AI reports disabled (visitor purge still runs)")
+    Scheduler(recognizer).start()
