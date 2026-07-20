@@ -4,6 +4,7 @@ import QuoteGenerator from './QuoteGenerator';
 export default function LeadDetail({ lead, onClose, onContact }) {
   const [disposition, setDisposition] = useState('');
   const [closureOutcome, setClosureOutcome] = useState('');
+  const [track, setTrack] = useState(lead.interest_track || '');
   const [note, setNote] = useState('');
   const [followupDate, setFollowupDate] = useState('');
   const [followupReason, setFollowupReason] = useState('');
@@ -23,15 +24,22 @@ export default function LeadDetail({ lead, onClose, onContact }) {
       await onContact(lead.id, { closure_outcome: closureOutcome, note });
       setDisposition('');
       setClosureOutcome('');
+      setTrack('');
       setNote('');
       onClose();
+      return;
+    }
+
+    if (disposition === 'Interested' && !track) {
+      alert('Select a track (CPL / PPL / Flying)');
       return;
     }
 
     await onContact(lead.id, {
       channel: 'phone',
       disposition,
-      note
+      note,
+      ...(disposition === 'Interested' ? { interest_track: track } : {})
     });
 
     if (disposition === 'Callback' && followupDate) {
@@ -43,6 +51,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
     }
 
     setDisposition('');
+    setTrack('');
     setNote('');
     onClose();
   };
@@ -60,7 +69,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
               <p className="text-gray-500">{lead.email}</p>
             </div>
             <button
-              onClick={onClose}
+              onClick={() => { setTrack(''); onClose(); }}
               className="text-gray-400 hover:text-gray-600 text-2xl"
             >
               ×
@@ -165,6 +174,27 @@ export default function LeadDetail({ lead, onClose, onContact }) {
               </button>
             </div>
           </div>
+
+          {disposition === 'Interested' && (
+            <div className="mb-4 p-3 bg-green-50 rounded">
+              <label className="block text-sm font-semibold mb-2">Course Track *</label>
+              <div className="flex flex-wrap gap-2">
+                {['CPL', 'PPL', 'Flying'].map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setTrack(t)}
+                    className={`flex-1 min-w-[90px] py-3 px-3 rounded-lg border-2 transition font-semibold ${
+                      track === t
+                        ? 'border-green-600 bg-green-100 text-green-700'
+                        : 'border-gray-300 hover:border-green-400'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {disposition === 'Closed' && (
             <div className="mb-4 p-3 bg-slate-50 rounded">

@@ -211,7 +211,8 @@ async def get_leads(current_emp = Depends(get_current_employee)):
                    COALESCE(l.parked, FALSE) as parked, COALESCE(l.closed, FALSE) as closed,
                    (SELECT COUNT(*) FROM contact_attempt WHERE lead_id = l.id AND disposition = 'Not reachable') as not_reachable_count,
                    EXTRACT(EPOCH FROM (NOW() - l.created_at))/60 as age_minutes,
-                   l.closure_outcome, l.guardian_name, l.qualifications, l.is_eligible, l.nios_interested
+                   l.closure_outcome, l.guardian_name, l.qualifications, l.is_eligible, l.nios_interested,
+                   l.interest_track
             FROM lead l
             ORDER BY l.created_at DESC
         """)
@@ -225,7 +226,8 @@ async def get_leads(current_emp = Depends(get_current_employee)):
                 "dedup_key": r[13], "last_note": r[14], "parked": r[15], "closed": r[16],
                 "not_reachable_count": r[17], "age_minutes": float(r[18]),
                 "closure_outcome": r[19], "guardian_name": r[20], "qualifications": r[21] or [],
-                "is_eligible": r[22], "nios_interested": r[23]
+                "is_eligible": r[22], "nios_interested": r[23],
+                "interest_track": r[24]
             })
     return leads
 
@@ -247,6 +249,7 @@ async def log_contact(lead_id: str, data: dict, current_emp = Depends(get_curren
         name, phone, email, course_interest, address = lead_row
         disposition = data.get('disposition')
         note = data.get('note')
+        interest_track = data.get('interest_track')
         
         cur.execute(
             """INSERT INTO contact_attempt (lead_id, staff_id, channel, disposition, note, connected, attempted_at)
@@ -265,6 +268,10 @@ async def log_contact(lead_id: str, data: dict, current_emp = Depends(get_curren
             WHERE id = %s
         """, (disposition, note, lead_id))
         
+        # Persist course track only for Interested leads (keeps course_interest untouched)
+        if disposition == 'Interested' and interest_track:
+            cur.execute("UPDATE lead SET interest_track = %s WHERE id = %s", (interest_track, lead_id))
+
         # Set flags based on disposition (don't overwrite status)
         if disposition == 'Not interested':
             cur.execute("UPDATE lead SET closed = TRUE WHERE id = %s", (lead_id,))

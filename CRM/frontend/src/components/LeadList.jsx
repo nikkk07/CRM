@@ -5,7 +5,11 @@ import { useState } from 'react';
 function bucketOf(l) {
   if (l.status === 'closed') return 'closed';
   if (!l.first_contacted_at) return 'pending';
-  if (l.status === 'Interested') return 'interested';
+  if (l.status === 'Interested') {
+    if (l.interest_track === 'PPL') return 'ppl';
+    if (l.interest_track === 'Flying') return 'flying';
+    return 'interested'; // CPL and legacy Interested leads with no track
+  }
   if (l.status === 'Not interested') return 'not-interested';
   if (l.status === 'Not reachable') return 'not-reachable';
   if (l.status === 'Callback') return 'callback';
@@ -57,6 +61,8 @@ export default function LeadList({ leads, onSelectLead }) {
         {tab('pending', `Pending (${count('pending')})`, 'bg-orange-600 text-white')}
         {tab('in-progress', `In Progress (${count('in-progress')})`, 'bg-sky-600 text-white')}
         {tab('interested', `Interested (${count('interested')})`, 'bg-green-600 text-white')}
+        {tab('ppl', `PPL (${count('ppl')})`, 'bg-teal-600 text-white')}
+        {tab('flying', `Flying (${count('flying')})`, 'bg-cyan-600 text-white')}
         {tab('callback', `Callback (${count('callback')})`, 'bg-purple-600 text-white')}
         {tab('not-reachable', `Not Reachable (${count('not-reachable')})`, 'bg-yellow-600 text-white')}
         {tab('not-interested', `Not Interested (${count('not-interested')})`, 'bg-gray-600 text-white')}
