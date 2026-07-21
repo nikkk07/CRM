@@ -7,26 +7,26 @@
 # it would only waste CPU. Add it back if that camera is ever repointed.
 
 cameras:
-  - name: Entrance Walkway     # CH2 — main way in; primary entry detection
-    channel: 2
+  # - name: Entrance Walkway     # CH2 — main way in; primary entry detection
+  #   channel: 2
 
   - name: Reception            # CH1
     channel: 1
 
-  - name: Staircase            # CH5 — chokepoint between floors
-    channel: 5
+  # - name: Staircase            # CH5 — chokepoint between floors
+  #   channel: 5
 
   - name: Staff Office         # CH6
     channel: 6
 
-  - name: Cabin                # CH7
-    channel: 7
+  # - name: Cabin                # CH7
+  #   channel: 7
 
   - name: Classroom            # CH3
     channel: 3
 
-  - name: Parking Passage      # CH4
-    channel: 4
+  # - name: Parking Passage      # CH4
+  #   channel: 4
 
 # Advanced: a camera with a non-standard address can use "url" instead:
 #  - name: Special Camera
