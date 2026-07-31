@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -15,8 +15,10 @@ from encryption import encrypt_value, decrypt_value
 from mongo_bridge import start_mongo_bridge
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import logging
 import os
+import secrets
 import uuid
 
 load_dotenv()
@@ -1881,6 +1883,181 @@ async def attendance_list(date: str = None, current_emp = Depends(get_current_em
     return {"date": target, "rows": rows,
             "present": len(rows),
             "inside": sum(1 for r in rows if not r["exit_time"])}
+
+
+# ---------------------------------------------------------------------------
+# Hikvision biometric terminal (DS-K1T320EFWX) attendance webhook
+#
+# The access terminal pushes events to a plain HTTP listener. It CANNOT send
+# custom headers, so this endpoint authenticates via a ?token= query param
+# (compared against the same ATTENDANCE_INGEST_TOKEN as /api/attendance/ingest).
+# It writes to the shared cctv_attendance table, namespacing device people with
+# a "hik:" prefix so they never collide with CCTV-sourced people.
+#
+# It always returns 200 quickly (except for auth) so the device does not
+# retry-storm on malformed/irrelevant events.
+# ---------------------------------------------------------------------------
+
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+async def _parse_hikvision_body(request: Request):
+    """Return the pushed JSON dict, or None if it cannot be parsed.
+
+    Hikvision sends application/json, or multipart/form-data when a face image
+    is attached (the JSON then lives in a part usually named 'event_log').
+    Never raises; logs and returns None on failure (incl. XML-ish payloads).
+    """
+    ctype = request.headers.get("content-type", "")
+    try:
+        if "application/json" in ctype:
+            return await request.json()
+
+        if "form-data" in ctype or "multipart" in ctype:
+            form = await request.form()
+            raw = form.get("event_log")
+            if raw is None:
+                # Fall back to the first part that looks like JSON.
+                for value in form.values():
+                    if isinstance(value, str) and value.strip().startswith("{"):
+                        raw = value
+                        break
+            if raw is None:
+                logging.warning("Hikvision: multipart push with no JSON part; keys=%s",
+                                list(form.keys()))
+                return None
+            if hasattr(raw, "read"):  # UploadFile part
+                raw = (await raw.read()).decode("utf-8", "replace")
+            return json.loads(raw)
+
+        # Unknown / XML-ish content type: try JSON, otherwise give up gracefully.
+        text = (await request.body()).decode("utf-8", "replace").strip()
+        if text.startswith("{"):
+            return json.loads(text)
+        logging.warning("Hikvision: unsupported body (ctype=%r, prefix=%r); ignoring",
+                        ctype, text[:80])
+        return None
+    except Exception as exc:
+        logging.warning("Hikvision: failed to parse body (ctype=%r): %s", ctype, exc)
+        return None
+
+
+def _parse_hikvision_dt(raw: str):
+    """Parse a Hikvision ISO dateTime into an Asia/Kolkata-aware datetime.
+
+    Handles trailing 'Z' and offsets like +05:30. If no offset is present the
+    device time is assumed to already be institute-local (IST). Returns None on
+    failure so the caller can fall back to 'now'.
+    """
+    if not raw:
+        return None
+    try:
+        d = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_IST)
+        return d.astimezone(_IST)
+    except Exception:
+        return None
+
+
+@app.post("/api/attendance/hikvision")
+async def attendance_hikvision(request: Request, token: str = ""):
+    """Attendance webhook for a Hikvision DS-K1T320EFWX access terminal.
+
+    Auth is via ?token= (device can't send headers). Accepts JSON or
+    multipart/form-data. Always returns 200 quickly (except auth failures) so
+    the device does not retry-storm.
+    """
+    # --- auth (query param, constant-time compare) ---
+    expected = os.getenv("ATTENDANCE_INGEST_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503,
+                            detail="ATTENDANCE_INGEST_TOKEN not configured on the CRM server")
+    if not secrets.compare_digest(token or "", expected):
+        raise HTTPException(status_code=401, detail="Invalid attendance token")
+
+    try:
+        payload = await _parse_hikvision_body(request)
+        if not isinstance(payload, dict):
+            return {"status": "ignored", "reason": "unparseable body"}
+
+        event = payload.get("AccessControllerEvent")
+        if not isinstance(event, dict):
+            event = {}
+
+        # FILTER: only successful authentication events (majorEventType 5).
+        major = event.get("majorEventType")
+        if str(major) != "5":
+            return {"status": "ignored", "reason": f"majorEventType={major}"}
+
+        emp_no = str(event.get("employeeNoString") or "").strip()
+        if not emp_no:
+            # Non-person events (door/tamper/etc.) carry no employee id.
+            logging.info("Hikvision: auth event without employeeNoString "
+                         "(subEventType=%s); ignoring", event.get("subEventType"))
+            return {"status": "ignored", "reason": "no employeeNoString"}
+
+        name = str(event.get("name") or "").strip()
+        att_status = str(event.get("attendanceStatus") or "").strip().lower()
+
+        # dateTime may be nested in the event or at the top level; may carry an offset.
+        dt = _parse_hikvision_dt(event.get("dateTime") or payload.get("dateTime") or "")
+        if dt is None:
+            dt = datetime.now(_IST)
+        date_str = dt.strftime("%Y-%m-%d")
+        time_str = dt.strftime("%H:%M:%S")
+
+        source_id = f"hik:{emp_no}"
+
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # --- entry/exit decision ---
+            if att_status == "checkin":
+                is_entry = True
+            elif att_status == "checkout":
+                is_entry = False
+            else:
+                # undefined/missing: first punch of the day = entry; any later
+                # punch updates exit_time (last punch of the day becomes exit).
+                cur.execute("SELECT 1 FROM cctv_attendance "
+                            "WHERE source_person_id = %s AND date = %s",
+                            (source_id, date_str))
+                is_entry = cur.fetchone() is None
+
+            if is_entry:
+                cur.execute("""
+                    INSERT INTO cctv_attendance
+                        (source_person_id, person_name, person_role, date,
+                         entry_time, updated_at)
+                    VALUES (%s, %s, 'employee', %s, %s, NOW())
+                    ON CONFLICT (source_person_id, date) DO UPDATE SET
+                        person_name = EXCLUDED.person_name,
+                        entry_time  = COALESCE(cctv_attendance.entry_time,
+                                               EXCLUDED.entry_time),
+                        updated_at  = NOW()
+                """, (source_id, name, date_str, time_str))
+            else:
+                cur.execute("""
+                    INSERT INTO cctv_attendance
+                        (source_person_id, person_name, person_role, date,
+                         exit_time, updated_at)
+                    VALUES (%s, %s, 'employee', %s, %s, NOW())
+                    ON CONFLICT (source_person_id, date) DO UPDATE SET
+                        person_name = EXCLUDED.person_name,
+                        exit_time   = EXCLUDED.exit_time,
+                        updated_at  = NOW()
+                """, (source_id, name, date_str, time_str))
+
+        logging.info("Hikvision attendance: emp=%s name=%r date=%s time=%s -> %s",
+                     emp_no, name, date_str, time_str,
+                     "entry" if is_entry else "exit")
+        return {"status": "ok", "person_id": source_id, "date": date_str,
+                "time": time_str, "type": "entry" if is_entry else "exit"}
+    except Exception as exc:
+        # Never surface a 500 to the device; log and ack so it stops retrying.
+        logging.exception("Hikvision: error processing push: %s", exc)
+        return {"status": "error-ignored"}
 
 
 if __name__ == "__main__":

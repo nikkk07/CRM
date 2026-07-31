@@ -19,7 +19,7 @@ services:
         sync: false
       - key: ENCRYPTION_KEY          # 32-byte key for field encryption
         sync: false
-      - key: ATTENDANCE_INGEST_TOKEN # must match attendance/.env CRM_WEBHOOK_TOKEN
+      - key: ATTENDANCE_INGEST_TOKEN # shared secret for the /api/attendance webhooks
         sync: false
       - key: GROQ_API_KEY
         sync: false

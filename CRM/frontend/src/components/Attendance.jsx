@@ -1,10 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_URL } from '../api';
 
-// Camera dashboard runs on the institute's Mac Mini. Override with
-// VITE_CCTV_URL at build time if you access it via the Mac's LAN IP.
-const CCTV_URL = import.meta.env.VITE_CCTV_URL || 'http://localhost:8100';
-
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
 // Canonical roles are student | employee | visitor. Legacy rows may say 'staff'.
@@ -66,9 +62,9 @@ export default function Attendance() {
       {/* Header row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">CCTV Attendance</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Attendance</h2>
           <p className="text-sm text-slate-500">
-            Marked automatically by the camera system at the institute.
+            Captured by the biometric fingerprint terminal at the institute.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -85,15 +81,6 @@ export default function Attendance() {
           >
             ↻ Refresh
           </button>
-          <a
-            href={CCTV_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm"
-            title="Opens the live camera dashboard (Admin login required there too)"
-          >
-            📷 Camera Monitoring
-          </a>
         </div>
       </div>
 

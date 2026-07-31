@@ -11,9 +11,6 @@ __pycache__/
 *.pyc
 *.pyo
 
-# ===== attendance runtime data (DB, face photos, logs, session secret) =====
-attendance/data/
-
 # ===== node / vite =====
 node_modules/
 dist/
