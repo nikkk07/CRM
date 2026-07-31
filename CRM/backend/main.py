@@ -28,6 +28,10 @@ logging.basicConfig(level=logging.INFO)
 # months are aggregated into attendance_monthly_summary and then purged.
 ATTENDANCE_RETENTION_MONTHS = 3
 
+# The Hikvision terminal re-pushes old stored records; reject events whose date
+# is more than this many days in the past (or more than 1 day in the future).
+HIKVISION_MAX_EVENT_AGE_DAYS = 2
+
 scheduler = None
 mongo_scheduler = None
 
@@ -2019,10 +2023,36 @@ async def attendance_hikvision(request: Request, token: str = ""):
         date_str = dt.strftime("%Y-%m-%d")
         time_str = dt.strftime("%H:%M:%S")
 
+        # --- staleness guard (before any DB write) ---
+        # The terminal keeps re-pushing stored records dated years ago. Drop any
+        # event older than HIKVISION_MAX_EVENT_AGE_DAYS, or more than 1 day in the
+        # future (clock skew). Still ack 200 so it stops retry-storming.
+        today_ist = datetime.now(_IST).date()
+        age_days = (today_ist - dt.date()).days
+        if age_days > HIKVISION_MAX_EVENT_AGE_DAYS or age_days < -1:
+            logging.info("Hikvision: stale event emp=%s date=%s (age %d days); ignoring",
+                         emp_no, date_str, age_days)
+            return {"status": "ignored-stale", "person_id": f"hik:{emp_no}",
+                    "date": date_str}
+
         source_id = f"hik:{emp_no}"
 
         with get_db() as conn:
             cur = conn.cursor()
+
+            # --- duplicate suppression ---
+            # If this exact (person, date, time) punch was already recorded (as an
+            # entry or an exit), skip re-running the upsert.
+            cur.execute("""
+                SELECT 1 FROM cctv_attendance
+                WHERE source_person_id = %s AND date = %s
+                  AND (entry_time = %s OR exit_time = %s)
+            """, (source_id, date_str, time_str, time_str))
+            if cur.fetchone():
+                logging.info("Hikvision: duplicate punch emp=%s date=%s time=%s; skipping",
+                             emp_no, date_str, time_str)
+                return {"status": "ignored-duplicate", "person_id": source_id,
+                        "date": date_str, "time": time_str}
 
             # --- resolve identity from the device->CRM mapping ---
             # If Admin has mapped this raw device id, use the CRM person's name,
