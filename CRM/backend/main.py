@@ -14,7 +14,7 @@ from quote_generator import generate_quote_pdf
 from encryption import encrypt_value, decrypt_value
 from mongo_bridge import start_mongo_bridge
 import json
-from datetime import datetime
+from datetime import datetime, date
 from zoneinfo import ZoneInfo
 import logging
 import os
@@ -24,6 +24,10 @@ import uuid
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
+# Attendance retention window: raw cctv_attendance rows older than this many
+# months are aggregated into attendance_monthly_summary and then purged.
+ATTENDANCE_RETENTION_MONTHS = 3
+
 scheduler = None
 mongo_scheduler = None
 
@@ -32,6 +36,14 @@ async def lifespan(app: FastAPI):
     global scheduler, mongo_scheduler
     scheduler = start_sla_monitor()
     mongo_scheduler = start_mongo_bridge()
+    # Reuse the SLA scheduler (do NOT start a second one): run the attendance
+    # retention purge on the 1st of every month at 02:00 Asia/Kolkata.
+    scheduler.add_job(
+        run_attendance_retention, 'cron',
+        day=1, hour=2, minute=0, timezone='Asia/Kolkata',
+        id='attendance_retention', replace_existing=True,
+    )
+    logging.info("Attendance retention job registered (1st of month, 02:00 IST)")
     yield
     if scheduler:
         scheduler.shutdown()
@@ -2012,6 +2024,24 @@ async def attendance_hikvision(request: Request, token: str = ""):
         with get_db() as conn:
             cur = conn.cursor()
 
+            # --- resolve identity from the device->CRM mapping ---
+            # If Admin has mapped this raw device id, use the CRM person's name,
+            # role and id. If not, keep the device-supplied name and mark the row
+            # 'unmapped' so students are never silently mislabelled as employees.
+            cur.execute("""
+                SELECT display_name, role, crm_person_id
+                FROM device_person_map WHERE device_person_id = %s
+            """, (emp_no,))
+            mapping = cur.fetchone()
+            if mapping:
+                person_name = mapping[0]
+                person_role = mapping[1]
+                crm_id = str(mapping[2]) if mapping[2] else None
+            else:
+                person_name = name
+                person_role = 'unmapped'
+                crm_id = None
+
             # --- entry/exit decision ---
             if att_status == "checkin":
                 is_entry = True
@@ -2028,26 +2058,32 @@ async def attendance_hikvision(request: Request, token: str = ""):
             if is_entry:
                 cur.execute("""
                     INSERT INTO cctv_attendance
-                        (source_person_id, person_name, person_role, date,
+                        (source_person_id, person_name, person_role, crm_id, date,
                          entry_time, updated_at)
-                    VALUES (%s, %s, 'employee', %s, %s, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
                     ON CONFLICT (source_person_id, date) DO UPDATE SET
                         person_name = EXCLUDED.person_name,
+                        person_role = EXCLUDED.person_role,
+                        crm_id      = EXCLUDED.crm_id,
                         entry_time  = COALESCE(cctv_attendance.entry_time,
                                                EXCLUDED.entry_time),
                         updated_at  = NOW()
-                """, (source_id, name, date_str, time_str))
+                """, (source_id, person_name, person_role, crm_id,
+                      date_str, time_str))
             else:
                 cur.execute("""
                     INSERT INTO cctv_attendance
-                        (source_person_id, person_name, person_role, date,
+                        (source_person_id, person_name, person_role, crm_id, date,
                          exit_time, updated_at)
-                    VALUES (%s, %s, 'employee', %s, %s, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
                     ON CONFLICT (source_person_id, date) DO UPDATE SET
                         person_name = EXCLUDED.person_name,
+                        person_role = EXCLUDED.person_role,
+                        crm_id      = EXCLUDED.crm_id,
                         exit_time   = EXCLUDED.exit_time,
                         updated_at  = NOW()
-                """, (source_id, name, date_str, time_str))
+                """, (source_id, person_name, person_role, crm_id,
+                      date_str, time_str))
 
         logging.info("Hikvision attendance: emp=%s name=%r date=%s time=%s -> %s",
                      emp_no, name, date_str, time_str,
@@ -2058,6 +2094,271 @@ async def attendance_hikvision(request: Request, token: str = ""):
         # Never surface a 500 to the device; log and ack so it stops retrying.
         logging.exception("Hikvision: error processing push: %s", exc)
         return {"status": "error-ignored"}
+
+
+# ---------------------------------------------------------------------------
+# Device-person mapping, monthly view, and archived summaries (Admin only).
+# ---------------------------------------------------------------------------
+
+def _require_attendance_admin(current_emp):
+    """Same fail-closed gate as the daily attendance view."""
+    if current_emp.get("department") != "Admin":
+        raise HTTPException(status_code=403,
+                            detail="Only the Admin department can manage CCTV attendance")
+
+
+def _strip_hik(source_person_id: str) -> str:
+    """Return the raw device id (drop the 'hik:' namespace prefix if present)."""
+    return source_person_id[4:] if source_person_id.startswith("hik:") else source_person_id
+
+
+@app.get("/api/attendance/device-people")
+async def attendance_device_people(current_emp = Depends(get_current_employee)):
+    """Every distinct device person seen in attendance, with its mapping (if any).
+
+    Unmapped people are listed first so Admin can bind them quickly.
+    """
+    _require_attendance_admin(current_emp)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT seen.source_person_id, seen.device_name, seen.last_seen,
+                   m.person_type, m.crm_person_id, m.display_name, m.role
+            FROM (
+                SELECT source_person_id,
+                       (ARRAY_AGG(person_name ORDER BY date DESC))[1] AS device_name,
+                       MAX(date) AS last_seen
+                FROM cctv_attendance
+                GROUP BY source_person_id
+            ) seen
+            LEFT JOIN device_person_map m
+                ON m.device_person_id = regexp_replace(seen.source_person_id, '^hik:', '')
+            ORDER BY (m.device_person_id IS NOT NULL), seen.last_seen DESC
+        """)
+        people = []
+        for r in cur.fetchall():
+            is_mapped = r[5] is not None
+            people.append({
+                "device_person_id": _strip_hik(r[0]),
+                "source_person_id": r[0],
+                "device_name": r[1],
+                "last_seen": r[2].isoformat() if r[2] else None,
+                "is_mapped": is_mapped,
+                "mapping": {
+                    "person_type": r[3],
+                    "crm_person_id": str(r[4]) if r[4] else None,
+                    "display_name": r[5],
+                    "role": r[6],
+                } if is_mapped else None,
+            })
+    return {"people": people,
+            "unmapped": sum(1 for p in people if not p["is_mapped"])}
+
+
+@app.post("/api/attendance/device-people/{device_person_id}/map")
+async def attendance_map_device_person(device_person_id: str, data: dict,
+                                       current_emp = Depends(get_current_employee)):
+    """Bind a raw device id to a CRM person and backfill existing rows.
+
+    Body: {person_type, crm_person_id, display_name, role}.
+    """
+    _require_attendance_admin(current_emp)
+    person_type = (data.get("person_type") or "").strip()
+    role = (data.get("role") or "").strip()
+    display_name = (data.get("display_name") or "").strip()
+    crm_person_id = data.get("crm_person_id")
+
+    if person_type not in ("employee", "student"):
+        raise HTTPException(status_code=422, detail="person_type must be 'employee' or 'student'")
+    if role not in ("employee", "student"):
+        raise HTTPException(status_code=422, detail="role must be 'employee' or 'student'")
+    if not display_name:
+        raise HTTPException(status_code=422, detail="display_name is required")
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        # Validate the CRM person exists in the referenced table.
+        if crm_person_id:
+            table = "employee" if person_type == "employee" else "student"
+            cur.execute(f"SELECT 1 FROM {table} WHERE id = %s", (crm_person_id,))
+            if cur.fetchone() is None:
+                raise HTTPException(status_code=404,
+                                    detail=f"No {person_type} found with id {crm_person_id}")
+
+        cur.execute("""
+            INSERT INTO device_person_map
+                (device_person_id, person_type, crm_person_id, display_name, role)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (device_person_id) DO UPDATE SET
+                person_type   = EXCLUDED.person_type,
+                crm_person_id = EXCLUDED.crm_person_id,
+                display_name  = EXCLUDED.display_name,
+                role          = EXCLUDED.role
+        """, (device_person_id, person_type, crm_person_id, display_name, role))
+
+        # Backfill: correct every past punch for this device id, prefixed or not.
+        crm_id = str(crm_person_id) if crm_person_id else None
+        cur.execute("""
+            UPDATE cctv_attendance
+            SET person_name = %s, person_role = %s, crm_id = %s, updated_at = NOW()
+            WHERE source_person_id = %s OR source_person_id = %s
+        """, (display_name, role, crm_id,
+              device_person_id, f"hik:{device_person_id}"))
+        backfilled = cur.rowcount
+
+    return {"status": "mapped", "device_person_id": device_person_id,
+            "backfilled_rows": backfilled}
+
+
+@app.delete("/api/attendance/device-people/{device_person_id}/map")
+async def attendance_unmap_device_person(device_person_id: str,
+                                         current_emp = Depends(get_current_employee)):
+    """Remove a device->CRM mapping. Existing attendance rows are left as-is."""
+    _require_attendance_admin(current_emp)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM device_person_map WHERE device_person_id = %s",
+                    (device_person_id,))
+        removed = cur.rowcount
+    if removed == 0:
+        raise HTTPException(status_code=404, detail="No mapping for that device person")
+    return {"status": "unmapped", "device_person_id": device_person_id}
+
+
+@app.get("/api/attendance/monthly")
+async def attendance_monthly(month: str = None, current_emp = Depends(get_current_employee)):
+    """Per-person attendance for a whole month (YYYY-MM). Admin only."""
+    _require_attendance_admin(current_emp)
+    target = month or datetime.now(_IST).strftime("%Y-%m")
+    try:
+        start = datetime.strptime(target + "-01", "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    nm = start.month % 12 + 1
+    ny = start.year + (1 if start.month == 12 else 0)
+    end = date(ny, nm, 1)
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT source_person_id, person_name, person_role, crm_id,
+                   date, entry_time, exit_time
+            FROM cctv_attendance
+            WHERE date >= %s AND date < %s
+            ORDER BY person_name, date
+        """, (start, end))
+        rows = cur.fetchall()
+
+    people = {}
+    for r in rows:
+        pid = r[0]
+        p = people.get(pid)
+        if p is None:
+            p = people[pid] = {
+                "source_person_id": pid,
+                "device_person_id": _strip_hik(pid),
+                "name": r[1], "role": r[2], "crm_id": r[3],
+                "days_present": 0, "first_seen": None, "last_seen": None,
+                "days": [],
+            }
+        d = r[4].isoformat()
+        p["days"].append({"date": d, "entry_time": r[5], "exit_time": r[6]})
+        p["days_present"] += 1
+        if p["first_seen"] is None or d < p["first_seen"]:
+            p["first_seen"] = d
+        if p["last_seen"] is None or d > p["last_seen"]:
+            p["last_seen"] = d
+        # keep the most recent name/role/crm_id
+        p["name"], p["role"], p["crm_id"] = r[1], r[2], r[3]
+
+    result = sorted(people.values(), key=lambda x: x["name"] or "")
+    return {"month": target, "people": result, "person_count": len(result)}
+
+
+@app.get("/api/attendance/summary")
+async def attendance_summary(months: int = 12, current_emp = Depends(get_current_employee)):
+    """Archived monthly summaries (survive the raw-row purge). Admin only."""
+    _require_attendance_admin(current_emp)
+    months = max(1, min(int(months or 12), 120))
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT month, source_person_id, person_name, person_role, crm_id,
+                   days_present, first_date, last_date
+            FROM attendance_monthly_summary
+            WHERE month >= (date_trunc('month', CURRENT_DATE) - (%s || ' months')::interval)
+            ORDER BY month DESC, person_name
+        """, (months,))
+        rows = [{
+            "month": r[0].strftime("%Y-%m") if r[0] else None,
+            "source_person_id": r[1],
+            "device_person_id": _strip_hik(r[1]),
+            "name": r[2], "role": r[3], "crm_id": r[4],
+            "days_present": r[5],
+            "first_date": r[6].isoformat() if r[6] else None,
+            "last_date": r[7].isoformat() if r[7] else None,
+        } for r in cur.fetchall()]
+    return {"months": months, "rows": rows}
+
+
+def _attendance_retention_cutoff(today: date = None) -> date:
+    """First day of (current month - ATTENDANCE_RETENTION_MONTHS). Rows strictly
+    older than this cutoff are summarized then purged."""
+    base = (today or datetime.now(_IST).date()).replace(day=1)
+    m = base.month - ATTENDANCE_RETENTION_MONTHS
+    y = base.year
+    while m <= 0:
+        m += 12
+        y -= 1
+    return date(y, m, 1)
+
+
+def run_attendance_retention():
+    """Aggregate then purge raw attendance older than the retention window.
+
+    Summary upsert (step A) and delete (step C) run in ONE transaction so a
+    failure can never delete rows without an archived summary.
+    """
+    cutoff = _attendance_retention_cutoff()
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            # STEP A: roll every old month up into the summary (idempotent upsert).
+            cur.execute("""
+                INSERT INTO attendance_monthly_summary
+                    (month, source_person_id, person_name, person_role, crm_id,
+                     days_present, first_date, last_date)
+                SELECT date_trunc('month', date)::date AS month,
+                       source_person_id,
+                       (ARRAY_AGG(person_name ORDER BY date DESC))[1],
+                       (ARRAY_AGG(person_role ORDER BY date DESC))[1],
+                       (ARRAY_AGG(crm_id ORDER BY date DESC))[1],
+                       COUNT(DISTINCT date),
+                       MIN(date), MAX(date)
+                FROM cctv_attendance
+                WHERE date < %s
+                GROUP BY month, source_person_id
+                ON CONFLICT (month, source_person_id) DO UPDATE SET
+                    person_name  = EXCLUDED.person_name,
+                    person_role  = EXCLUDED.person_role,
+                    crm_id       = EXCLUDED.crm_id,
+                    days_present = EXCLUDED.days_present,
+                    first_date   = EXCLUDED.first_date,
+                    last_date    = EXCLUDED.last_date
+            """, (cutoff,))
+            rows_summarized = cur.rowcount
+
+            # STEP C: only now that summaries are written, purge the raw rows.
+            cur.execute("DELETE FROM cctv_attendance WHERE date < %s", (cutoff,))
+            rows_deleted = cur.rowcount
+            # get_db() commits on clean exit; both statements land atomically.
+        logging.info("Attendance retention: cutoff=%s summarized=%d deleted=%d",
+                     cutoff.isoformat(), rows_summarized, rows_deleted)
+        return {"cutoff": cutoff.isoformat(),
+                "rows_summarized": rows_summarized, "rows_deleted": rows_deleted}
+    except Exception as exc:
+        logging.exception("Attendance retention failed (cutoff=%s): %s", cutoff, exc)
+        raise
 
 
 if __name__ == "__main__":
