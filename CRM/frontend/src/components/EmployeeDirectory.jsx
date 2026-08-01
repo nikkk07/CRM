@@ -13,6 +13,8 @@ export default function EmployeeDirectory() {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({});
+  // Track whether the user has manually edited Login ID so we stop auto-mirroring Employee ID into it.
+  const [loginIdManual, setLoginIdManual] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   useEffect(() => {
@@ -55,7 +57,7 @@ export default function EmployeeDirectory() {
         ? `${API_URL}/api/employees/${formData.id}`
         : `${API_URL}/api/employees`;
       
-      await fetch(url, {
+      const res = await fetch(url, {
         method: formData.id ? 'PATCH' : 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -63,10 +65,24 @@ export default function EmployeeDirectory() {
         },
         body: JSON.stringify(formData)
       });
-      
+
+      if (!res.ok) {
+        // Surface the backend's real reason (e.g. duplicate login ID) instead of a generic message.
+        let detail = `Failed to save employee (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body && body.detail) {
+            detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+          }
+        } catch (_) { /* non-JSON error body; keep the status-based message */ }
+        showToast(detail, 'error');
+        return;
+      }
+
       showToast(formData.id ? 'Employee updated' : 'Employee created', 'success');
       setShowForm(false);
       setFormData({});
+      setLoginIdManual(false);
       loadEmployees();
     } catch (error) {
       showToast('Failed to save employee', 'error');
@@ -174,7 +190,7 @@ export default function EmployeeDirectory() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <h2 className="text-2xl font-bold text-gray-900">Employee Directory</h2>
         <button
-          onClick={() => { setFormData({}); setShowForm(true); }}
+          onClick={() => { setFormData({}); setLoginIdManual(false); setShowForm(true); }}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
         >
           + Add Employee
@@ -516,21 +532,36 @@ Enter 1, 2, or 3:`);
             
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input 
-                  type="text" 
-                  placeholder="Employee ID" 
-                  value={formData.employee_id || ''} 
-                  onChange={(e) => setFormData({...formData, employee_id: e.target.value})} 
-                  className="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500" 
-                />
-                <input 
-                  type="text" 
-                  placeholder="Login ID *" 
-                  value={formData.login_id || ''} 
-                  onChange={(e) => setFormData({...formData, login_id: e.target.value})} 
-                  className="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500" 
-                  required 
-                />
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Employee ID</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. EMP001"
+                    value={formData.employee_id || ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      // Auto-fill Login ID from Employee ID until the user edits Login ID directly.
+                      setFormData(prev => ({
+                        ...prev,
+                        employee_id: v,
+                        // Only auto-fill for new employees; never clobber an existing login_id on edit.
+                        login_id: (loginIdManual || prev.id) ? prev.login_id : v,
+                      }));
+                    }}
+                    className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Login ID <span className="text-red-500">*</span> <span className="text-gray-400">(used to sign in)</span></label>
+                  <input
+                    type="text"
+                    placeholder="Login ID"
+                    value={formData.login_id || ''}
+                    onChange={(e) => { setLoginIdManual(true); setFormData({...formData, login_id: e.target.value}); }}
+                    className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
                 <input 
                   type="text" 
                   placeholder="Full Name *" 
@@ -607,13 +638,26 @@ Enter 1, 2, or 3:`);
                   onChange={(e) => setFormData({...formData, email: e.target.value})} 
                   className="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500" 
                 />
-                <input 
-                  type="text" 
-                  placeholder="Job Role" 
-                  value={formData.job_role || ''} 
-                  onChange={(e) => setFormData({...formData, job_role: e.target.value})} 
-                  className="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500" 
+                <input
+                  type="text"
+                  placeholder="Job Role"
+                  value={formData.job_role || ''}
+                  onChange={(e) => setFormData({...formData, job_role: e.target.value})}
+                  className="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500"
                 />
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Login PIN <span className="text-gray-400">(optional, 4 digits)</span></label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d{4}"
+                    maxLength={4}
+                    placeholder="e.g. 1234"
+                    value={formData.login_pin || ''}
+                    onChange={(e) => setFormData({...formData, login_pin: e.target.value.replace(/\D/g, '').slice(0, 4)})}
+                    className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
               </div>
               <textarea 
                 placeholder="Address" 
@@ -632,7 +676,7 @@ Enter 1, 2, or 3:`);
                 </button>
                 <button 
                   type="button" 
-                  onClick={() => { setShowForm(false); setFormData({}); }} 
+                  onClick={() => { setShowForm(false); setFormData({}); setLoginIdManual(false); }}
                   className="px-6 py-2 bg-gray-200 rounded hover:bg-gray-300 font-medium"
                 >
                   Cancel

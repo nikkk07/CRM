@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+import psycopg
 from database import get_db
 from auth import authenticate_employee, create_access_token, get_current_employee, hash_password
 from schemas import LoginRequest, TokenResponse, EmployeeCreate
@@ -996,24 +997,43 @@ async def create_employee(data: dict, current_emp = Depends(get_current_employee
         if department not in ('Admin', 'IT', 'Sales', 'Instructors'):
             raise HTTPException(status_code=400, detail="department must be one of: Admin, IT, Sales, Instructors")
 
-        cur.execute(
-            """INSERT INTO employee (
-                employee_id, name, phone, email, job_role, address,
-                pay_scale_encrypted, joining_date, status, date_of_leaving,
-                department, password_hash, permissions
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id""",
-            (
-                data.get('employee_id'), data.get('name'), data.get('phone'),
-                data.get('email'), data.get('job_role'), data.get('address'),
-                pay_scale_encrypted, data.get('joining_date'),
-                data.get('status', 'active'), data.get('date_of_leaving'),
-                department,
-                hash_password(data.get('password', 'welcome123')),
-                json.dumps(data.get('permissions', {}))
+        # login_id is NOT NULL with a UNIQUE index on LOWER(login_id) (migration 019).
+        # Derive it following migration 019's own convention: employee_id, else phone.
+        login_id = data.get('login_id') or data.get('employee_id') or data.get('phone')
+        if not login_id:
+            raise HTTPException(status_code=400, detail="login_id, employee_id or phone is required")
+
+        # login_pin is optional (migration 009); insert only when provided.
+        login_pin = data.get('login_pin') or None
+
+        # Pre-check the case-insensitive UNIQUE index to give a clean 409 instead of a raw DB error.
+        cur.execute("SELECT 1 FROM employee WHERE LOWER(login_id) = LOWER(%s)", (login_id,))
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="An employee with this login ID already exists")
+
+        try:
+            cur.execute(
+                """INSERT INTO employee (
+                    employee_id, login_id, login_pin, name, phone, email, job_role, address,
+                    pay_scale_encrypted, joining_date, status, date_of_leaving,
+                    department, password_hash, permissions
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id""",
+                (
+                    data.get('employee_id'), login_id, login_pin,
+                    data.get('name'), data.get('phone'),
+                    data.get('email'), data.get('job_role'), data.get('address'),
+                    pay_scale_encrypted, data.get('joining_date'),
+                    data.get('status', 'active'), data.get('date_of_leaving'),
+                    department,
+                    hash_password(data.get('password', 'welcome123')),
+                    json.dumps(data.get('permissions', {}))
+                )
             )
-        )
-        emp_id = cur.fetchone()[0]
+            emp_id = cur.fetchone()[0]
+        except psycopg.errors.UniqueViolation:
+            # Closes the race between the pre-check above and the insert.
+            raise HTTPException(status_code=409, detail="An employee with this login ID already exists")
     return {"id": str(emp_id)}
 
 @app.patch("/api/employees/{employee_id}")
