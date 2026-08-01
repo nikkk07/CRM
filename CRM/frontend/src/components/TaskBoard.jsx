@@ -11,6 +11,8 @@ export default function TaskBoard() {
   const [showAddTask, setShowAddTask] = useState(false);
   const [formData, setFormData] = useState({});
   const [currentEmployee, setCurrentEmployee] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const department = currentEmployee?.department || '';
   // Access control via department (aligned with App.jsx): only Admin sees all tasks
@@ -82,9 +84,11 @@ export default function TaskBoard() {
 
   const handleAddTask = async (e) => {
     e.preventDefault();
+    if (submitting) return;  // guard against double-submit while a request is in flight
+    setSubmitting(true);
     try {
       const token = localStorage.getItem('token');
-      await fetch(`${API_URL}/api/tasks`, {
+      const res = await fetch(`${API_URL}/api/tasks`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -92,13 +96,51 @@ export default function TaskBoard() {
         },
         body: JSON.stringify(formData)
       });
-      
+
+      if (!res.ok) {
+        // Surface the backend's real reason (e.g. the 409 duplicate guard) so users don't re-click.
+        const data = await res.json().catch(() => ({}));
+        showToast(data.detail || 'Failed to add task', 'error');
+        return;
+      }
+
       showToast('Task added', 'success');
       setShowAddTask(false);
       setFormData({});
       loadData();
     } catch (error) {
       showToast('Failed to add task', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Admin may delete any task; others only a task they created or that is assigned to them.
+  const canDeleteTask = (task) =>
+    department === 'Admin' ||
+    task.created_by === currentEmployee?.id ||
+    task.assigned_to === currentEmployee?.id;
+
+  const handleDeleteTask = async (taskId) => {
+    setConfirmDeleteId(null);
+    const token = localStorage.getItem('token');
+    const previousTasks = tasks;
+    setTasks(tasks.filter(t => t.id !== taskId));  // optimistic removal
+    try {
+      const res = await fetch(`${API_URL}/api/tasks/${taskId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.detail || 'Failed to delete task', 'error');
+        setTasks(previousTasks);  // restore on failure
+        return;
+      }
+      showToast('Task deleted', 'success');
+    } catch (error) {
+      showToast('Failed to delete task', 'error');
+      setTasks(previousTasks);  // restore on failure
     }
   };
 
@@ -214,17 +256,46 @@ export default function TaskBoard() {
                       <div key={task.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition">
                         <div className="flex items-start justify-between gap-3 mb-2">
                           <h4 className="font-medium text-gray-900 text-sm flex-1">{task.title}</h4>
-                          <select
-                            value={task.status}
-                            onChange={(e) => handleStatusChange(task.id, e.target.value)}
-                            className={`text-xs px-2 py-1 rounded-full border font-medium ${STATUS_COLORS[task.status] || 'bg-gray-100 text-gray-800'}`}
-                          >
-                            <option value="pending">Pending</option>
-                            <option value="done">Completed</option>
-                            <option value="aborted">Aborted</option>
-                          </select>
+                          <div className="flex items-center gap-1">
+                            <select
+                              value={task.status}
+                              onChange={(e) => handleStatusChange(task.id, e.target.value)}
+                              className={`text-xs px-2 py-1 rounded-full border font-medium ${STATUS_COLORS[task.status] || 'bg-gray-100 text-gray-800'}`}
+                            >
+                              <option value="pending">Pending</option>
+                              <option value="done">Completed</option>
+                              <option value="aborted">Aborted</option>
+                            </select>
+                            {canDeleteTask(task) && confirmDeleteId !== task.id && (
+                              <button
+                                onClick={() => setConfirmDeleteId(task.id)}
+                                title="Delete task"
+                                className="p-1 text-gray-400 hover:text-red-600 transition"
+                              >
+                                🗑️
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        
+
+                        {confirmDeleteId === task.id && (
+                          <div className="flex items-center gap-2 mb-2 text-xs bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">
+                            <span className="text-red-700 font-medium flex-1">Delete this task?</span>
+                            <button
+                              onClick={() => handleDeleteTask(task.id)}
+                              className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 font-medium"
+                            >
+                              Delete
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 font-medium"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+
                         {task.description && (
                           <p className="text-xs text-gray-600 mb-2 line-clamp-2">{task.description}</p>
                         )}
@@ -320,14 +391,16 @@ export default function TaskBoard() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition"
+                  disabled={submitting}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition disabled:bg-blue-400 disabled:cursor-not-allowed"
                 >
-                  Add Task
+                  {submitting ? 'Adding...' : 'Add Task'}
                 </button>
                 <button
                   type="button"
+                  disabled={submitting}
                   onClick={() => { setShowAddTask(false); setFormData({}); }}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium transition"
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>

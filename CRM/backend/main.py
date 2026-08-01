@@ -836,7 +836,21 @@ async def create_task(data: dict, current_emp = Depends(get_current_employee)):
             if assigned_to and assigned_to != current_emp['id']:
                 raise HTTPException(status_code=403, detail="Can only create tasks for yourself")
             assigned_to = current_emp['id']
-        
+
+        # Safety net against double-submit (Render cold starts make users click repeatedly):
+        # reject an identical task (same title + assignee) created in the last 30 seconds.
+        # IS NOT DISTINCT FROM so NULL title/assignee compare correctly.
+        cur.execute(
+            """SELECT id FROM task
+               WHERE title IS NOT DISTINCT FROM %s
+                 AND assigned_to IS NOT DISTINCT FROM %s
+                 AND created_at > NOW() - INTERVAL '30 seconds'
+               LIMIT 1""",
+            (data.get('title'), assigned_to)
+        )
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="This task was just created.")
+
         cur.execute(
             """INSERT INTO task (title, description, assigned_to, created_by, status, due_date)
                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
@@ -896,6 +910,25 @@ async def update_task(task_id: str, data: dict, current_emp = Depends(get_curren
                 values.append(task_id)
                 cur.execute(f"UPDATE task SET {', '.join(fields)} WHERE id = %s", values)
     return {"status": "updated"}
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: str, current_emp = Depends(get_current_employee)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT created_by, assigned_to FROM task WHERE id = %s", (task_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found")
+        # Admin may delete any task; others only a task they created or that is assigned to them.
+        if current_emp['department'] != 'Admin':
+            created_by = str(row[0])
+            assigned_to = str(row[1]) if row[1] else None
+            if current_emp['id'] not in (created_by, assigned_to):
+                raise HTTPException(status_code=403,
+                                    detail="You can only delete tasks you created or are assigned to")
+        # task_comment.task_id has ON DELETE CASCADE (migration 001), so comments are removed automatically.
+        cur.execute("DELETE FROM task WHERE id = %s", (task_id,))
+    return {"status": "deleted"}
 
 @app.get("/api/tasks/{task_id}/comments")
 async def get_task_comments(task_id: str, current_emp = Depends(get_current_employee)):
