@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { login } from '../api';
 
-export default function Login({ onLogin, onSwitchToEmployee }) {
+export default function Login({ onLogin, onSwitchToEmployee, onSwitchToStudent }) {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -72,12 +72,18 @@ export default function Login({ onLogin, onSwitchToEmployee }) {
           </button>
         </form>
 
-        <div className="mt-6 pt-6 border-t border-slate-200 text-center">
+        <div className="mt-6 pt-6 border-t border-slate-200 text-center flex flex-col gap-3">
           <button
             onClick={onSwitchToEmployee}
             className="text-sm text-indigo-600 font-medium hover:underline"
           >
             Employee Login →
+          </button>
+          <button
+            onClick={onSwitchToStudent}
+            className="text-sm text-indigo-600 font-medium hover:underline"
+          >
+            Student Login →
           </button>
         </div>
       </div>

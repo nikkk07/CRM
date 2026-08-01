@@ -11,6 +11,8 @@ from database import get_db
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 720
+# Student sessions are short-lived and deliberately shorter than the employee token.
+STUDENT_TOKEN_EXPIRE_HOURS = 12
 
 security = HTTPBearer()
 
@@ -62,12 +64,15 @@ async def get_current_employee(credentials: HTTPAuthorizationCredentials = Depen
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # A student token must NEVER authenticate against an employee endpoint.
+        if payload.get("type") == "student":
+            raise credentials_exception
         emp_id: str = payload.get("sub")
         if emp_id is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
+
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -84,4 +89,45 @@ async def get_current_employee(credentials: HTTPAuthorizationCredentials = Depen
             "email": row[3],
             "department": row[4],
             "active": row[5]
+        }
+
+
+async def get_current_student(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Validate a student JWT. Rejects anything that is not a type='student' token,
+    so employee tokens can never reach a student endpoint."""
+    token = credentials.credentials
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "student":
+            raise credentials_exception
+        student_id: str = payload.get("sub")
+        if student_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, first_name, last_name, login_enabled FROM student WHERE id = %s",
+            (student_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise credentials_exception
+        if not row[3]:
+            # Login was disabled after the token was issued.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Login is disabled for this account. Contact the institute.",
+            )
+        return {
+            "id": str(row[0]),
+            "first_name": row[1],
+            "last_name": row[2],
+            "type": "student",
         }

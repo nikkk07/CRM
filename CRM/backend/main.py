@@ -5,7 +5,10 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import psycopg
 from database import get_db
-from auth import authenticate_employee, create_access_token, get_current_employee, hash_password
+from auth import (
+    authenticate_employee, create_access_token, get_current_employee,
+    get_current_student, hash_password, verify_password, STUDENT_TOKEN_EXPIRE_HOURS,
+)
 from schemas import LoginRequest, TokenResponse, EmployeeCreate
 from lead_ingestion import ingest_lead, normalize_phone
 import r2_storage
@@ -15,7 +18,10 @@ from quote_generator import generate_quote_pdf
 from encryption import encrypt_value, decrypt_value
 from mongo_bridge import start_mongo_bridge
 import json
-from datetime import datetime, date
+import re
+import time
+from collections import defaultdict
+from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 import logging
 import os
@@ -146,8 +152,93 @@ async def employee_login(data: dict):
         }
         
         token = create_access_token({"sub": str(emp_id), "is_employee": True})
-        
+
         return {"access_token": token, "employee": emp_data}
+
+
+# --- Student login: mobile + bcrypt PIN, with per-mobile rate limiting -------
+# In-memory failed-attempt tracker: mobile_normalized -> [failure timestamps].
+# Single-process deployment (Render), so an in-process window is sufficient.
+_student_login_fails = defaultdict(list)
+_STUDENT_LOGIN_MAX_FAILS = 5
+_STUDENT_LOGIN_WINDOW_SEC = 15 * 60
+
+
+def _student_login_is_rate_limited(mobile_norm: str) -> bool:
+    now = time.time()
+    recent = [t for t in _student_login_fails.get(mobile_norm, []) if now - t < _STUDENT_LOGIN_WINDOW_SEC]
+    _student_login_fails[mobile_norm] = recent
+    return len(recent) >= _STUDENT_LOGIN_MAX_FAILS
+
+
+def _student_login_record_failure(mobile_norm: str):
+    _student_login_fails[mobile_norm].append(time.time())
+
+
+@app.post("/api/auth/student-login")
+async def student_login(data: dict):
+    """Students authenticate with a 10-digit mobile + PIN. Mobile alone is never enough."""
+    raw = (data.get('mobile') or '').strip()
+    pin = (data.get('pin') or '').strip()
+
+    # Accept a bare 10-digit number; reject anything else after stripping spaces/dashes.
+    digits = re.sub(r'\D', '', raw)
+    if len(digits) != 10:
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit mobile number")
+    mobile_norm = normalize_phone(digits)  # -> +91XXXXXXXXXX
+
+    # Rate limit BEFORE touching the DB so the endpoint can't be hammered for enumeration.
+    if _student_login_is_rate_limited(mobile_norm):
+        raise HTTPException(status_code=429, detail="Too many failed attempts. Try again in 15 minutes.")
+
+    # Identical response for "unknown number" and "wrong PIN" — no student enumeration.
+    generic = HTTPException(status_code=401, detail="Invalid mobile number or PIN")
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, first_name, last_name, login_pin_hash, login_enabled FROM student WHERE mobile_normalized = %s",
+            (mobile_norm,)
+        )
+        row = cur.fetchone()
+
+        if not row:
+            _student_login_record_failure(mobile_norm)
+            raise generic
+
+        student_id, first_name, last_name, pin_hash, login_enabled = row
+
+        # No PIN configured -> login is impossible. NEVER treat a missing PIN as "no check".
+        if not pin_hash:
+            raise HTTPException(status_code=403, detail="PIN not set — contact the institute.")
+
+        if not pin or not verify_password(pin, pin_hash):
+            _student_login_record_failure(mobile_norm)
+            raise generic
+
+        # Correct PIN but access revoked. Only revealed to someone who knows the PIN.
+        if not login_enabled:
+            raise HTTPException(status_code=403, detail="Login is disabled for this account. Contact the institute.")
+
+        cur.execute("UPDATE student SET last_login_at = NOW() WHERE id = %s", (student_id,))
+
+    # Successful login clears the failure counter for this mobile.
+    _student_login_fails.pop(mobile_norm, None)
+
+    token = create_access_token(
+        {"sub": str(student_id), "type": "student"},
+        expires_delta=timedelta(hours=STUDENT_TOKEN_EXPIRE_HOURS),
+    )
+    return {
+        "access_token": token,
+        "student": {
+            "id": str(student_id),
+            "first_name": first_name,
+            "last_name": last_name,
+            "name": " ".join(x for x in [first_name, last_name] if x),
+        },
+    }
+
 
 @app.post("/api/auth/change-password")
 async def change_password(data: dict, current_emp = Depends(get_current_employee)):
@@ -1850,6 +1941,174 @@ async def delete_student_document(student_id: str, doc_id: str, current_emp = De
         _audit(cur, current_emp['id'], 'delete_document', 'student_document',
                {"student_id": student_id, "doc_id": doc_id, "doc_type": r[1]})
     return {"status": "deleted"}
+
+
+# ------------------------- STUDENT SELF-SERVICE PORTAL ---------------------
+# Every endpoint below is scoped to the calling student's own id (from the JWT).
+# A student can never name another student's id, so cross-student access is impossible.
+
+# Fields a student may edit on their own profile. Everything else is institutional
+# and off-limits (course, admission_date, computer_number, mobile, login_*, lead_id).
+_STUDENT_SELF_EDITABLE = {'guardian_name', 'emergency_contact', 'address'}
+
+
+@app.get("/api/student/me")
+async def student_me(current_student = Depends(get_current_student)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, first_name, middle_name, last_name, guardian_name, mobile,
+                   emergency_contact, address, course, admission_date, computer_number,
+                   created_at, last_login_at
+            FROM student WHERE id = %s
+        """, (current_student['id'],))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return {
+            "id": str(r[0]), "first_name": r[1], "middle_name": r[2], "last_name": r[3],
+            "guardian_name": r[4], "mobile": r[5], "emergency_contact": r[6], "address": r[7],
+            "course": r[8], "admission_date": r[9].isoformat() if r[9] else None,
+            "computer_number": r[10],
+            "created_at": r[11].isoformat() if r[11] else None,
+            "last_login_at": r[12].isoformat() if r[12] else None,
+        }
+
+
+@app.patch("/api/student/me")
+async def student_update_me(data: dict, current_student = Depends(get_current_student)):
+    # student table has no email column; accept-but-ignore for forward compatibility.
+    data.pop('email', None)
+    # Reject any attempt to touch an institutional / security field with 403.
+    forbidden = set(data.keys()) - _STUDENT_SELF_EDITABLE
+    if forbidden:
+        raise HTTPException(
+            status_code=403,
+            detail=f"You may not edit: {', '.join(sorted(forbidden))}",
+        )
+    fields, values = [], []
+    for k in _STUDENT_SELF_EDITABLE:
+        if k in data:
+            val = data[k]
+            if k == 'emergency_contact' and val:
+                val = normalize_phone(val)  # stored E.164, consistent with create_student
+            fields.append(f"{k} = %s")
+            values.append(val)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No editable fields provided")
+    fields.append("updated_at = NOW()")
+    values.append(current_student['id'])
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE student SET {', '.join(fields)} WHERE id = %s RETURNING id", values)
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Student not found")
+    return {"status": "updated"}
+
+
+@app.get("/api/student/me/documents")
+async def student_my_documents(current_student = Depends(get_current_student)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, doc_type, original_filename, mime_type, size_bytes, uploaded_at
+            FROM student_document WHERE student_id = %s ORDER BY uploaded_at DESC
+        """, (current_student['id'],))
+        docs = {}
+        for d in cur.fetchall():
+            docs[d[1]] = {
+                "id": str(d[0]), "doc_type": d[1], "original_filename": d[2],
+                "mime_type": d[3], "size_bytes": d[4],
+                "uploaded_at": d[5].isoformat() if d[5] else None,
+            }
+    return {"doc_types": STUDENT_DOC_TYPES, "documents": docs}
+
+
+@app.get("/api/student/me/documents/{doc_id}/url")
+async def student_my_document_url(doc_id: str, current_student = Depends(get_current_student)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        # Scoped to the caller's own student_id: a student can only ever read their own r2_key.
+        cur.execute(
+            "SELECT r2_key FROM student_document WHERE id = %s AND student_id = %s",
+            (doc_id, current_student['id'])
+        )
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Document not found")
+        url = r2_storage.presigned_get(r[0], expires=300)  # <= 5 min, same as staff flow
+    return {"url": url, "expires_in": 300}
+
+
+@app.post("/api/student/me/documents")
+async def student_upload_my_document(
+    doc_type: str = Form(...),
+    file: UploadFile = File(...),
+    current_student = Depends(get_current_student),
+):
+    if doc_type not in STUDENT_DOC_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid doc_type")
+    student_id = current_student['id']
+    raw = await file.read()
+    out_bytes, mime, ext = _process_image(raw)  # same file-type/size limits as staff upload
+    key = r2_storage.build_key(student_id, doc_type, ext)
+    with get_db() as conn:
+        cur = conn.cursor()
+        # Replace an existing file of this doc_type (delete old R2 object first).
+        cur.execute("SELECT id, r2_key FROM student_document WHERE student_id = %s AND doc_type = %s",
+                    (student_id, doc_type))
+        old = cur.fetchone()
+        r2_storage.upload_bytes(key, out_bytes, mime)
+        if old:
+            try:
+                r2_storage.delete_object(old[1])
+            except Exception:
+                pass
+            cur.execute("DELETE FROM student_document WHERE id = %s", (old[0],))
+        # uploaded_by references employee(id); a student is not an employee -> NULL.
+        cur.execute("""
+            INSERT INTO student_document (student_id, doc_type, r2_key, original_filename,
+                                          mime_type, size_bytes, uploaded_by)
+            VALUES (%s, %s, %s, %s, %s, %s, NULL) RETURNING id
+        """, (student_id, doc_type, key, file.filename, mime, len(out_bytes)))
+        doc_id = cur.fetchone()[0]
+        _audit(cur, None, 'upload_document', 'student_document',
+               {"student_id": student_id, "doc_type": doc_type, "by": "student", "replaced": bool(old)})
+    return {"status": "uploaded", "id": str(doc_id), "doc_type": doc_type}
+
+
+@app.post("/api/students/{student_id}/set-pin")
+async def set_student_pin(student_id: str, data: dict, current_emp = Depends(get_current_employee)):
+    """Admin-only: set/reset a student's login PIN and/or toggle login_enabled."""
+    if current_emp['department'] != 'Admin':
+        raise HTTPException(status_code=403, detail="Only the Admin department can manage student PINs")
+
+    pin = data.get('pin')
+    login_enabled = data.get('login_enabled')
+    if pin is None and login_enabled is None:
+        raise HTTPException(status_code=400, detail="Provide a pin and/or login_enabled")
+
+    fields, values = [], []
+    if pin is not None:
+        pin = str(pin).strip()
+        if not re.fullmatch(r'\d{4}', pin):
+            raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits")
+        fields.append("login_pin_hash = %s")
+        values.append(hash_password(pin))  # bcrypt, never plaintext
+    if login_enabled is not None:
+        fields.append("login_enabled = %s")
+        values.append(bool(login_enabled))
+    values.append(student_id)
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE student SET {', '.join(fields)} WHERE id = %s RETURNING id", values)
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Student not found")
+        _audit(cur, current_emp['id'], 'set_pin', 'student',
+               {"student_id": student_id, "pin_changed": pin is not None,
+                "login_enabled": login_enabled})
+    return {"status": "updated"}
 
 
 # ---------------------------------------------------------------------------

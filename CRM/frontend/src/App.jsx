@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import Login from './components/Login';
 import EmployeeLogin from './components/EmployeeLogin';
+import StudentLogin from './components/StudentLogin';
+import StudentPortal from './components/StudentPortal';
 import LeadList from './components/LeadList';
 import LeadDetail from './components/LeadDetail';
 import Outbox from './components/Outbox';
@@ -17,6 +19,9 @@ import { syncData, API_URL } from './api';
 export default function App() {
   const [employee, setEmployee] = useState(null);
   const [showEmployeeLogin, setShowEmployeeLogin] = useState(false);
+  // Student session is entirely separate from the employee session (own token + storage keys).
+  const [student, setStudent] = useState(null);
+  const [showStudentLogin, setShowStudentLogin] = useState(false);
   const [lastSync, setLastSync] = useState(null);
   const [leads, setLeads] = useState([]);
   const [leadsError, setLeadsError] = useState('');
@@ -50,6 +55,13 @@ export default function App() {
     const empStr = localStorage.getItem('employee');
     if (token && empStr) {
       setEmployee(JSON.parse(empStr));
+      return;
+    }
+    // Restore a student session only when no employee session is present.
+    const studentToken = localStorage.getItem('student_token');
+    const studentStr = localStorage.getItem('student');
+    if (studentToken && studentStr) {
+      setStudent(JSON.parse(studentStr));
     }
   }, []);
 
@@ -162,6 +174,13 @@ export default function App() {
     setEmployee(null);
   };
 
+  const handleStudentLogout = () => {
+    localStorage.removeItem('student_token');
+    localStorage.removeItem('student');
+    setStudent(null);
+    setShowStudentLogin(false);
+  };
+
   const handleChangePassword = async (e) => {
     e.preventDefault();
     setPasswordError('');
@@ -203,11 +222,23 @@ export default function App() {
     }
   };
 
+  // Logged-in student -> dedicated portal (never sees the CRM).
+  if (student && !employee) {
+    return <StudentPortal onLogout={handleStudentLogout} />;
+  }
+
   if (!employee) {
+    if (showStudentLogin) {
+      return <StudentLogin onLogin={setStudent} onBack={() => setShowStudentLogin(false)} />;
+    }
     return showEmployeeLogin ? (
       <EmployeeLogin onLogin={setEmployee} />
     ) : (
-      <Login onLogin={setEmployee} onSwitchToEmployee={() => setShowEmployeeLogin(true)} />
+      <Login
+        onLogin={setEmployee}
+        onSwitchToEmployee={() => setShowEmployeeLogin(true)}
+        onSwitchToStudent={() => setShowStudentLogin(true)}
+      />
     );
   }
 

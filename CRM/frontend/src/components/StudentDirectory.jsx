@@ -230,6 +230,12 @@ function StudentDetail({ studentId, onBack }) {
   const [showDelete, setShowDelete] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  // Setting a student PIN is Admin-only (enforced server-side); hide the button for others.
+  const isAdmin = (() => {
+    try { return JSON.parse(localStorage.getItem('employee') || '{}').department === 'Admin'; }
+    catch { return false; }
+  })();
 
   const deleteStudent = async () => {
     setDeleting(true);
@@ -298,10 +304,18 @@ function StudentDetail({ studentId, onBack }) {
     <div className="bg-white rounded-lg shadow p-4 sm:p-6">
       <div className="flex justify-between items-center mb-4">
         <button onClick={onBack} className="text-blue-600 hover:underline">← Back to Students</button>
-        <button onClick={() => { setShowDelete(true); setConfirmText(''); }}
-          className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700">
-          Delete Student
-        </button>
+        <div className="flex gap-2">
+          {isAdmin && (
+            <button onClick={() => setShowPin(true)}
+              className="px-3 py-1 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">
+              Set PIN
+            </button>
+          )}
+          <button onClick={() => { setShowDelete(true); setConfirmText(''); }}
+            className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700">
+            Delete Student
+          </button>
+        </div>
       </div>
 
       <h2 className="text-2xl font-bold text-gray-900">
@@ -353,6 +367,14 @@ function StudentDetail({ studentId, onBack }) {
         })}
       </div>
 
+      {showPin && (
+        <SetPinModal
+          studentId={studentId}
+          studentName={[student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ')}
+          onClose={() => setShowPin(false)}
+        />
+      )}
+
       {showDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -383,6 +405,74 @@ function StudentDetail({ studentId, onBack }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SetPinModal({ studentId, studentName, onClose }) {
+  const [pin, setPin] = useState('');
+  const [loginEnabled, setLoginEnabled] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (pin && !/^\d{4}$/.test(pin)) {
+      showToast('PIN must be exactly 4 digits', 'error');
+      return;
+    }
+    // Send only what was provided: a PIN (if typed) and the login_enabled toggle.
+    const body = { login_enabled: loginEnabled };
+    if (pin) body.pin = pin;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/students/${studentId}/set-pin`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      setSaving(false);
+      if (!res.ok) { showToast(data.detail || 'Failed to update', 'error'); return; }
+      showToast('Student login updated', 'success');
+      onClose();
+    } catch { setSaving(false); showToast('Failed to update', 'error'); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-md w-full p-6">
+        <h3 className="text-lg font-bold text-gray-900 mb-1">Set Student Login PIN</h3>
+        <p className="text-sm text-gray-500 mb-4">{studentName}</p>
+        <form onSubmit={save} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">New 4-digit PIN</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="Leave blank to keep the current PIN"
+              maxLength={4}
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-indigo-500 tracking-widest"
+              autoFocus
+            />
+            <p className="text-xs text-gray-500 mt-1">The student signs in with their mobile number + this PIN.</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={loginEnabled} onChange={(e) => setLoginEnabled(e.target.checked)} />
+            Login enabled
+          </label>
+          <div className="flex gap-3 pt-2">
+            <button type="submit" disabled={saving}
+              className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded font-semibold hover:bg-indigo-700 disabled:bg-gray-300">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
