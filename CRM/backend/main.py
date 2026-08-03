@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -60,8 +61,17 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown()
     if mongo_scheduler:
         mongo_scheduler.shutdown()
+    # Cleanly drain the DB connection pool on shutdown.
+    try:
+        from database import pool
+        pool.close()
+    except Exception:
+        pass
 
 app = FastAPI(lifespan=lifespan)
+
+# Compress responses (esp. the large /api/sync snapshot) to cut transfer time.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.add_middleware(
     CORSMiddleware,

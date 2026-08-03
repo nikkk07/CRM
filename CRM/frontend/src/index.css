@@ -76,6 +76,14 @@
 
 * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
 
+html {
+  /* Fluid root: the whole rem-based UI scales smoothly with the viewport —
+     ~15px on phones (tighter, more fits), 16px on tablet/desktop (unchanged). */
+  font-size: clamp(14px, 13px + 0.55vw, 16px);
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
 html, body {
   margin: 0; padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
@@ -89,6 +97,9 @@ html, body {
 }
 
 #root { min-height: 100vh; position: relative; }
+
+/* Media never overflows its container on small screens */
+img, svg, video, canvas { max-width: 100%; height: auto; }
 
 /* Apple polish: tight tracking on titles, tabular figures for data */
 h1, h2, h3 { letter-spacing: -0.021em; }
@@ -336,6 +347,15 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   .glass-tabs { backdrop-filter: blur(12px) saturate(150%); -webkit-backdrop-filter: blur(12px) saturate(150%); }
   .glass-table th { padding: 0.6rem 0.9rem; }
   .glass-table td { padding: 0.75rem 0.9rem; }
+  /* iOS zooms the page when focusing an input <16px — force 16px on phones
+     so focusing a field never triggers a jarring zoom-jump. */
+  input, select, textarea { font-size: 16px; }
+}
+
+/* Tablet: slightly roomier data padding than phone, tighter than desktop */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .glass-table th { padding: 0.7rem 1.1rem; }
+  .glass-table td { padding: 0.85rem 1.1rem; }
 }
 
 /* ═══ Accessibility: honour reduced-motion — kill transforms/anims ═══ */
