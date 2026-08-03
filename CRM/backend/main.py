@@ -1106,6 +1106,166 @@ async def get_employee_detail(employee_id: str, current_emp = Depends(get_curren
             "net_salary": round(net_salary, 2) if monthly_salary else None
         }
 
+# ---------------------------------------------------------------------------
+# Biometric attendance helpers (source: cctv_attendance, joined via crm_id).
+# NOTE: there is no holiday concept anywhere in the codebase, so "working day"
+# means Mon-Sat and we EXCLUDE Sundays only.
+# ---------------------------------------------------------------------------
+
+def _parse_hms(t):
+    """Parse an 'HH:MM:SS' (or 'HH:MM') attendance time string into seconds. None on bad/empty input."""
+    if not t:
+        return None
+    parts = str(t).split(":")
+    try:
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        s = int(parts[2]) if len(parts) > 2 else 0
+        return h * 3600 + m * 60 + s
+    except (ValueError, IndexError):
+        return None
+
+def _fmt_hms(total_seconds):
+    """Format an average number of seconds back into a display 'HH:MM'. None passes through."""
+    if total_seconds is None:
+        return None
+    total_seconds = int(total_seconds) % 86400
+    return f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}"
+
+def compute_employee_attendance(cur, employee_id, year, month):
+    """Compute per-day + summary biometric attendance for one employee/month.
+
+    Returns (mapped, days, summary). If the employee has no device mapping at all,
+    mapped is False and the summary reads zero present / zero absent so callers can
+    say 'not linked to a biometric device' instead of implying absence every day.
+    """
+    import calendar as _calendar
+    from datetime import date as _date
+
+    # Is this employee linked to any biometric device id?
+    cur.execute(
+        "SELECT 1 FROM device_person_map WHERE crm_person_id = %s AND person_type = 'employee' LIMIT 1",
+        (employee_id,),
+    )
+    mapped = cur.fetchone() is not None
+
+    first_day = _date(year, month, 1)
+    last_day = _date(year + 1, 1, 1) if month == 12 else _date(year, month + 1, 1)
+
+    cur.execute(
+        """
+        SELECT date, entry_time, exit_time
+        FROM cctv_attendance
+        WHERE crm_id = %s AND date >= %s AND date < %s
+        ORDER BY date
+        """,
+        (employee_id, first_day, last_day),
+    )
+    rows = cur.fetchall()
+
+    days = []
+    entry_secs = []
+    exit_secs = []
+    total_hours = 0.0
+    present_dates = set()
+    for d, et, xt in rows:
+        e = _parse_hms(et)
+        x = _parse_hms(xt)
+        hours = None
+        if e is not None and x is not None and x >= e:
+            hours = round((x - e) / 3600.0, 2)
+            total_hours += hours
+        if et:
+            present_dates.add(d)
+            if e is not None:
+                entry_secs.append(e)
+        if x is not None:
+            exit_secs.append(x)
+        days.append({
+            "date": d.isoformat(),
+            "entry_time": et,
+            "exit_time": xt,
+            "hours_worked": hours,
+        })
+
+    # Leave days already recorded this month (any type) don't count as absences.
+    cur.execute(
+        """
+        SELECT leave_date FROM employee_leave_day
+        WHERE employee_id = %s AND leave_date >= %s AND leave_date < %s
+        """,
+        (employee_id, first_day, last_day),
+    )
+    leave_dates = {r[0] for r in cur.fetchall()}
+
+    # Working days = non-Sundays, capped at today so future days of an ongoing
+    # month are not counted as absences.
+    today = _date.today()
+    days_in_month = _calendar.monthrange(year, month)[1]
+    working_days = 0
+    for dnum in range(1, days_in_month + 1):
+        dt = _date(year, month, dnum)
+        if dt.weekday() == 6:      # Sunday
+            continue
+        if dt > today:             # future day of the current month
+            continue
+        working_days += 1
+
+    days_present = len(present_dates)
+
+    if not mapped:
+        # No device mapping -> do NOT imply absence.
+        return False, [], {
+            "days_present": 0,
+            "days_absent": 0,
+            "total_hours": 0.0,
+            "average_entry_time": None,
+            "average_exit_time": None,
+            "working_days": working_days,
+        }
+
+    working_leave_days = len([d for d in leave_dates if d.weekday() != 6])
+    days_absent = working_days - days_present - working_leave_days
+    if days_absent < 0:
+        days_absent = 0
+
+    summary = {
+        "days_present": days_present,
+        "days_absent": days_absent,
+        "total_hours": round(total_hours, 2),
+        "average_entry_time": _fmt_hms(sum(entry_secs) / len(entry_secs)) if entry_secs else None,
+        "average_exit_time": _fmt_hms(sum(exit_secs) / len(exit_secs)) if exit_secs else None,
+        "working_days": working_days,
+    }
+    return True, days, summary
+
+@app.get("/api/employees/{employee_id}/attendance/{year}/{month}")
+async def get_employee_attendance(employee_id: str, year: int, month: int, current_emp = Depends(get_current_employee)):
+    """Per-employee biometric attendance for a month (from cctv_attendance via crm_id)."""
+    # Admin can view anyone; an employee can only view their own record.
+    if current_emp['department'] != 'Admin':
+        if employee_id != current_emp['id']:
+            raise HTTPException(status_code=403, detail="Can only view your own attendance")
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM employee WHERE id = %s", (employee_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        mapped, days, summary = compute_employee_attendance(cur, employee_id, year, month)
+
+    return {
+        "employee_id": employee_id,
+        "employee_name": row[0],
+        "year": year,
+        "month": month,
+        "mapped": mapped,
+        "days": days,
+        "summary": summary,
+    }
+
 @app.post("/api/employees")
 async def create_employee(data: dict, current_emp = Depends(get_current_employee)):
     with get_db() as conn:
@@ -1366,7 +1526,12 @@ async def get_monthly_salary_report(employee_id: str, year: int, month: int, cur
             RETURNING id
         """, (employee_id, year, month, days_in_month, base_salary, 
               leave_days, half_days, paid_leave_days, deduction_amount, net_salary))
-        
+
+        # Biometric attendance figures for the same month. These are ADDITIONAL,
+        # informational fields — they do NOT feed into deduction_amount/net_salary,
+        # which are still driven solely by marked leave (see get_monthly_salary_report docstring).
+        att_mapped, _att_days, att_summary = compute_employee_attendance(cur, employee_id, year, month)
+
         return {
             "employee_id": employee_id,
             "employee_name": emp_name,
@@ -1380,7 +1545,13 @@ async def get_monthly_salary_report(employee_id: str, year: int, month: int, cur
             "paid_leave_days": paid_leave_days,
             "total_deduction_days": round(total_deduction_days, 2),
             "deduction_amount": round(deduction_amount, 2),
-            "net_salary": round(net_salary, 2)
+            "net_salary": round(net_salary, 2),
+            # --- Biometric attendance (informational; not used in pay calc) ---
+            "attendance_mapped": att_mapped,
+            "days_present": att_summary["days_present"],
+            "days_absent": att_summary["days_absent"],
+            "total_hours": att_summary["total_hours"],
+            "working_days": att_summary["working_days"]
         }
 
 @app.get("/api/salary-reports/{year}/{month}")

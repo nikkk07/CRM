@@ -2,19 +2,261 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  -webkit-tap-highlight-color: transparent;
+/* ═══════════════════════════════════════════════
+   Apple-Inspired Design System — v3
+   Solid surfaces + selective vibrancy
+   Color psychology: calm neutrals, depth via layering
+   ═══════════════════════════════════════════════ */
+
+:root {
+  /* Surfaces — mostly solid, not translucent */
+  --surface-base: #f5f5f7;          /* Apple's signature light gray */
+  --surface-elevated: #ffffff;       /* Pure white for cards */
+  --surface-raised: #fafafa;         /* Slightly off-white */
+  --surface-sunken: #eeeef0;         /* Recessed areas */
+  --surface-overlay: rgba(0,0,0,0.4);/* Modal overlay */
+
+  /* Accent — Apple blue */
+  --accent: #0071e3;                 /* Apple system blue */
+  --accent-hover: #0058b0;
+  --accent-light: #e8f1ff;
+
+  /* Text — solid, high-contrast */
+  --text-primary: #1d1d1f;           /* Apple's near-black */
+  --text-secondary: #424245;         /* Dark gray */
+  --text-tertiary: #6e6e73;          /* Medium gray */
+  --text-quaternary: #86868b;        /* Light gray */
+  --text-on-accent: #ffffff;
+  --text-on-dark: #f5f5f7;
+
+  /* Borders */
+  --border-default: #d2d2d7;         /* Apple's border gray */
+  --border-subtle: #e5e5ea;
+  --border-strong: #a1a1a6;
+
+  /* Shadows — subtle, not heavy */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+
+  /* Radii */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 }
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+* { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  background: var(--surface-base);
+  color: var(--text-primary);
 }
 
-#root {
-  min-height: 100vh;
+#root { min-height: 100vh; position: relative; }
+
+@layer components {
+  /* ── Navigation: dark with vibrancy ── */
+  .glass-nav {
+    background: rgba(29, 29, 31, 0.80);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* ── Tab bar: solid with subtle blur ── */
+  .glass-tabs {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  /* ── Cards: solid white, Apple-style ── */
+  .glass-card {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-sm);
+    border-radius: var(--radius-lg);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .glass-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--border-default);
+    transform: translateY(-1px);
+  }
+
+  /* ── Strong surface: modals ── */
+  .glass-strong {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-lg);
+    border-radius: var(--radius-xl);
+  }
+
+  /* ── Subtle: inner elements ── */
+  .glass-subtle {
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+  }
+
+  /* ── Stat cards ── */
+  .glass-stat {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-sm);
+    border-radius: var(--radius-md);
+    transition: all 0.25s ease;
+  }
+  .glass-stat:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+    border-color: var(--border-default);
+  }
+
+  /* ── Inputs: clean, solid ── */
+  .glass-input {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    transition: all 0.15s ease;
+  }
+  .glass-input::placeholder { color: var(--text-quaternary); }
+  .glass-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
+    outline: none;
+  }
+
+  /* ── Buttons ── */
+  .glass-btn {
+    background: var(--accent);
+    border: none;
+    box-shadow: var(--shadow-sm);
+    border-radius: var(--radius-sm);
+    color: var(--text-on-accent);
+    font-weight: 600;
+    transition: all 0.15s ease;
+  }
+  .glass-btn:hover {
+    background: var(--accent-hover);
+    box-shadow: var(--shadow-md);
+  }
+  .glass-btn:active { transform: scale(0.98); box-shadow: none; }
+  .glass-btn:disabled { background: #c7c7cc; box-shadow: none; cursor: not-allowed; }
+
+  /* Ghost button for dark nav */
+  .glass-btn-ghost {
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: var(--radius-sm);
+    color: var(--text-on-dark);
+    font-weight: 500;
+    transition: all 0.15s ease;
+  }
+  .glass-btn-ghost:hover {
+    background: rgba(255,255,255,0.20);
+  }
+
+  /* ── Badge ── */
+  .glass-badge {
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+  }
+
+  /* ── Overlay ── */
+  .glass-overlay {
+    background: var(--surface-overlay);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+
+  /* ── Table ── */
+  .glass-table {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+  .glass-table thead { background: var(--surface-sunken); }
+  .glass-table th {
+    color: var(--text-tertiary);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.70rem;
+    letter-spacing: 0.05em;
+    padding: 0.75rem 1.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .glass-table td {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+  .glass-table tbody tr { transition: background 0.12s ease; }
+  .glass-table tbody tr:hover { background: var(--accent-light); }
+
+  /* ── Tab buttons ── */
+  .glass-tab-btn {
+    padding: 0.75rem 1.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border: none;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+    color: var(--text-tertiary);
+    background: transparent;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .glass-tab-btn:hover { color: var(--text-primary); }
+  .glass-tab-btn.active {
+    color: var(--accent);
+    font-weight: 600;
+    border-bottom-color: var(--accent);
+  }
 }
+
+/* ── Text colors ── */
+.text-glass-primary { color: var(--text-primary); }
+.text-glass-secondary { color: var(--text-secondary); }
+.text-glass-muted { color: var(--text-tertiary); }
+.text-glass-light { color: var(--text-on-dark); }
+.text-glass-light-secondary { color: rgba(245, 245, 247, 0.75); }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #a1a1a6; }
+
+/* ── Toast ── */
+#toast-container > div {
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+/* ── Animation ── */
+@keyframes glassFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-glass-in { animation: glassFadeIn 0.3s cubic-bezier(0.4,0,0.2,1); }
+
+/* ── Select / date ── */
+select.glass-input option { background: #fff; color: var(--text-primary); }
+input[type="date"].glass-input,
+input[type="month"].glass-input,
+input[type="datetime-local"].glass-input { color-scheme: light; }

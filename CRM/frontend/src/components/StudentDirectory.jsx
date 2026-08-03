@@ -49,7 +49,7 @@ export default function StudentDirectory() {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
+    <div className="glass-card p-4 animate-glass-in">
       <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold">Students</h2>
         <div className="flex gap-2">
@@ -57,7 +57,7 @@ export default function StudentDirectory() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="🔍 Name, mobile, computer no., course"
-            className="flex-1 sm:w-72 px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500"
+            className="flex-1 sm:w-72 glass-input"
           />
           <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 whitespace-nowrap">
             ＋ Add Student
@@ -66,14 +66,14 @@ export default function StudentDirectory() {
       </div>
 
       {loading ? (
-        <div className="text-center text-gray-500 py-8">Loading…</div>
+        <div className="text-center text-glass-muted py-8">Loading…</div>
       ) : students.length === 0 ? (
-        <div className="text-center text-gray-500 py-8">No students found.</div>
+        <div className="text-center text-glass-muted py-8">No students found.</div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="glass-table overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left border-b text-gray-500">
+              <tr className="text-left border-b text-glass-muted">
                 <th className="px-3 py-2">Name</th>
                 <th className="px-3 py-2">Mobile</th>
                 <th className="px-3 py-2">Course</th>
@@ -87,7 +87,7 @@ export default function StudentDirectory() {
                 return (
                   <tr key={s.id} onClick={() => setSelectedId(s.id)}
                     className="border-b hover:bg-blue-50 cursor-pointer">
-                    <td className="px-3 py-2 font-medium text-gray-900">{s.name}</td>
+                    <td className="px-3 py-2 font-medium text-glass-primary">{s.name}</td>
                     <td className="px-3 py-2">{s.mobile}</td>
                     <td className="px-3 py-2">{s.course || '-'}</td>
                     <td className="px-3 py-2">{s.admission_date || '-'}</td>
@@ -172,11 +172,11 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
     } catch { setSaving(false); showToast('Failed to add student', 'error'); }
   };
 
-  const input = 'w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500';
+  const input = 'w-full glass-input';
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
+      <div className="glass-strong max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-4">
           <h2 className="text-xl font-bold">Add Student</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">×</button>
@@ -212,7 +212,7 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
             <input className={input} placeholder="Computer Number (DGCA)" value={form.computer_number} onChange={(e) => set('computer_number', e.target.value)} />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Admission Date</label>
+            <label className="block text-xs text-glass-muted mb-1">Admission Date</label>
             <input className={input} type="date" value={form.admission_date} onChange={(e) => set('admission_date', e.target.value)} />
           </div>
           <button type="submit" disabled={saving} className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400">
@@ -290,18 +290,18 @@ function StudentDetail({ studentId, onBack }) {
     else showToast('Delete failed', 'error');
   };
 
-  if (!student) return <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">Loading…</div>;
+  if (!student) return <div className="glass-card p-6 text-center text-glass-muted animate-glass-in">Loading…</div>;
 
   const uploadedCount = student.doc_types.filter((t) => student.documents[t]).length;
   const field = (label, val) => (
     <div>
-      <label className="text-sm font-medium text-gray-500">{label}</label>
-      <div className="mt-1 text-gray-900 font-medium">{val || '-'}</div>
+      <label className="text-sm font-medium text-glass-muted">{label}</label>
+      <div className="mt-1 text-glass-primary font-medium">{val || '-'}</div>
     </div>
   );
 
   return (
-    <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+    <div className="glass-card p-4 sm:p-6 animate-glass-in">
       <div className="flex justify-between items-center mb-4">
         <button onClick={onBack} className="text-blue-600 hover:underline">← Back to Students</button>
         <div className="flex gap-2">
@@ -318,10 +318,10 @@ function StudentDetail({ studentId, onBack }) {
         </div>
       </div>
 
-      <h2 className="text-2xl font-bold text-gray-900">
+      <h2 className="text-2xl font-bold text-glass-primary">
         {[student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ')}
       </h2>
-      <p className="text-gray-600 mb-4">{student.course || 'Student'}</p>
+      <p className="text-glass-secondary mb-4">{student.course || 'Student'}</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         {field('Mobile', student.mobile)}
@@ -376,8 +376,8 @@ function StudentDetail({ studentId, onBack }) {
       )}
 
       {showDelete && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
+          <div className="glass-strong max-w-md w-full p-6">
             <h3 className="text-lg font-bold text-red-700 mb-2">Delete Student</h3>
             <p className="text-sm text-gray-700 mb-4">
               This permanently deletes <span className="font-semibold">{[student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ')}</span>,
@@ -387,7 +387,7 @@ function StudentDetail({ studentId, onBack }) {
             <input
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-red-500 mb-4"
+              className="w-full glass-input mb-4"
               autoFocus
             />
             <div className="flex gap-3">
@@ -439,10 +439,10 @@ function SetPinModal({ studentId, studentName, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-gray-900 mb-1">Set Student Login PIN</h3>
-        <p className="text-sm text-gray-500 mb-4">{studentName}</p>
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
+      <div className="glass-strong max-w-md w-full p-6">
+        <h3 className="text-lg font-bold text-glass-primary mb-1">Set Student Login PIN</h3>
+        <p className="text-sm text-glass-muted mb-4">{studentName}</p>
         <form onSubmit={save} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">New 4-digit PIN</label>
@@ -453,10 +453,10 @@ function SetPinModal({ studentId, studentName, onClose }) {
               onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
               placeholder="Leave blank to keep the current PIN"
               maxLength={4}
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-indigo-500 tracking-widest"
+              className="w-full glass-input tracking-widest"
               autoFocus
             />
-            <p className="text-xs text-gray-500 mt-1">The student signs in with their mobile number + this PIN.</p>
+            <p className="text-xs text-glass-muted mt-1">The student signs in with their mobile number + this PIN.</p>
           </div>
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={loginEnabled} onChange={(e) => setLoginEnabled(e.target.checked)} />

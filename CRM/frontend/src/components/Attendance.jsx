@@ -34,15 +34,15 @@ export default function Attendance() {
   const [view, setView] = useState('day'); // 'day' | 'month' | 'devices'
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-glass-in">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Attendance</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className="text-lg font-semibold text-glass-primary">Attendance</h2>
+          <p className="text-sm text-glass-muted">
             Captured by the biometric fingerprint terminal at the institute.
           </p>
         </div>
-        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+        <div className="flex items-center gap-1 glass-tabs rounded-lg p-1">
           {[
             { key: 'day', label: 'Day' },
             { key: 'month', label: 'Month' },
@@ -52,7 +52,7 @@ export default function Attendance() {
               key={v.key}
               onClick={() => setView(v.key)}
               className={`px-3 py-1.5 text-sm font-medium rounded-md ${
-                view === v.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                view === v.key ? 'bg-white text-glass-primary shadow-sm' : 'text-glass-muted hover:text-slate-700'
               }`}
             >
               {v.label}
@@ -114,7 +114,7 @@ function DayView() {
           value={date}
           max={todayStr()}
           onChange={(e) => setDate(e.target.value)}
-          className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          className="glass-input px-3 py-2 text-sm"
         />
         <button
           onClick={() => load(date)}
@@ -128,21 +128,21 @@ function DayView() {
         {[
           { label: 'Marked present', value: data ? data.present : '—' },
           { label: 'Currently inside', value: data ? data.inside : '—', accent: 'text-emerald-600' },
-          { label: 'Left for the day', value: data ? data.present - data.inside : '—', accent: 'text-slate-500' },
+          { label: 'Left for the day', value: data ? data.present - data.inside : '—', accent: 'text-glass-muted' },
           { label: 'Visitors today', value: data ? visitorCount : '—', accent: 'text-purple-600' },
           { label: 'Date', value: date, small: true },
         ].map((c) => (
-          <div key={c.label} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <div className={`${c.small ? 'text-base' : 'text-2xl'} font-bold ${c.accent || 'text-slate-900'}`}>
+          <div key={c.label} className="glass-card p-4">
+            <div className={`${c.small ? 'text-base' : 'text-2xl'} font-bold ${c.accent || 'text-glass-primary'}`}>
               {c.value}
             </div>
-            <div className="text-xs text-slate-500 mt-1">{c.label}</div>
+            <div className="text-xs text-glass-muted mt-1">{c.label}</div>
           </div>
         ))}
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">{error}</div>
+        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: '#fef2f2' }}>{error}</div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -153,7 +153,7 @@ function DayView() {
             className={`px-3 py-1.5 text-sm font-medium rounded-lg border ${
               roleFilter === f.key
                 ? 'bg-indigo-600 text-white border-indigo-600'
-                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                : 'bg-white text-glass-secondary border-slate-300 hover:bg-slate-50'
             }`}
           >
             {f.label}
@@ -161,11 +161,11 @@ function DayView() {
         ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="glass-table overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className="glass-subtle text-left text-xs uppercase tracking-wide text-glass-muted">
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Entry</th>
@@ -176,7 +176,7 @@ function DayView() {
             <tbody className="divide-y divide-slate-100">
               {filteredRows.map((r) => (
                 <tr key={r.person_id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-slate-900">{r.name}</td>
+                  <td className="px-4 py-3 font-medium text-glass-primary">{r.name}</td>
                   <td className="px-4 py-3">{roleBadge(normRole(r.role))}</td>
                   <td className="px-4 py-3 tabular-nums">{r.entry_time || '—'}</td>
                   <td className="px-4 py-3 tabular-nums">{r.exit_time || '—'}</td>
@@ -272,27 +272,27 @@ function MonthView() {
           value={month}
           max={thisMonthStr()}
           onChange={(e) => setMonth(e.target.value)}
-          className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          className="glass-input px-3 py-2 text-sm"
         />
         <button onClick={() => load(month)}
           className="px-4 py-2 text-sm font-medium bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
           ↻ Refresh
         </button>
         <button onClick={exportCsv} disabled={!people.length}
-          className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">
+          className="glass-btn px-4 py-2 text-sm font-medium disabled:opacity-40">
           ⬇ Export CSV
         </button>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">{error}</div>
+        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: '#fef2f2' }}>{error}</div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="glass-table overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className="glass-subtle text-left text-xs uppercase tracking-wide text-glass-muted">
                 <th className="px-4 py-3 w-8"></th>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Role</th>
@@ -307,7 +307,7 @@ function MonthView() {
                   <tr className="hover:bg-slate-50 cursor-pointer"
                     onClick={() => setExpanded((e) => ({ ...e, [p.source_person_id]: !e[p.source_person_id] }))}>
                     <td className="px-4 py-3 text-slate-400">{expanded[p.source_person_id] ? '▾' : '▸'}</td>
-                    <td className="px-4 py-3 font-medium text-slate-900">{p.name}</td>
+                    <td className="px-4 py-3 font-medium text-glass-primary">{p.name}</td>
                     <td className="px-4 py-3">{roleBadge(normRole(p.role))}</td>
                     <td className="px-4 py-3 tabular-nums font-semibold">{p.days_present}</td>
                     <td className="px-4 py-3 tabular-nums">{p.first_seen}</td>
@@ -319,9 +319,9 @@ function MonthView() {
                       <td colSpan="5" className="px-4 py-3">
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                           {p.days.map((d) => (
-                            <div key={d.date} className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-2">
+                            <div key={d.date} className="text-xs glass-subtle rounded-lg px-3 py-2">
                               <div className="font-medium text-slate-700">{d.date}</div>
-                              <div className="tabular-nums text-slate-500">
+                              <div className="tabular-nums text-glass-muted">
                                 {(d.entry_time || '—')} → {(d.exit_time || '—')}
                               </div>
                             </div>
@@ -377,7 +377,7 @@ function DevicePeople() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-glass-muted">
           Bind each biometric device id to a CRM person. Unmapped ids are shown first.
           {data ? ` ${data.unmapped} unmapped.` : ''}
         </p>
@@ -388,7 +388,7 @@ function DevicePeople() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">{error}</div>
+        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: '#fef2f2' }}>{error}</div>
       )}
 
       <div className="space-y-3">
@@ -396,12 +396,12 @@ function DevicePeople() {
           <DevicePersonRow key={p.source_person_id} person={p} onChanged={load} />
         ))}
         {!loading && people.length === 0 && !error && (
-          <div className="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-400 text-sm">
+          <div className="glass-card p-10 text-center text-slate-400 text-sm">
             No device people have punched in yet.
           </div>
         )}
         {loading && (
-          <div className="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-400 text-sm">Loading…</div>
+          <div className="glass-card p-10 text-center text-slate-400 text-sm">Loading…</div>
         )}
       </div>
     </div>
@@ -482,14 +482,14 @@ function DevicePersonRow({ person, onChanged }) {
   };
 
   return (
-    <div className={`bg-white rounded-xl border shadow-sm p-4 ${person.is_mapped ? 'border-slate-200' : 'border-rose-200'}`}>
+    <div className={`glass-card p-4 ${person.is_mapped ? 'border-slate-200' : 'border-rose-200'}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="font-mono text-sm bg-slate-100 rounded px-2 py-1 text-slate-700">
+          <span className="font-mono text-sm glass-subtle rounded px-2 py-1 text-slate-700">
             #{person.device_person_id}
           </span>
           <div>
-            <div className="font-medium text-slate-900">
+            <div className="font-medium text-glass-primary">
               {person.is_mapped ? person.mapping.display_name : person.device_name || '(no name from device)'}
             </div>
             <div className="text-xs text-slate-400">
@@ -515,18 +515,18 @@ function DevicePersonRow({ person, onChanged }) {
       {editing && (
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-end border-t border-slate-100 pt-4">
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Type</label>
+            <label className="block text-xs font-medium text-glass-muted mb-1">Type</label>
             <select value={personType}
               onChange={(e) => { setPersonType(e.target.value); setSelected(null); setQuery(''); }}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              className="w-full glass-input px-3 py-2 text-sm">
               <option value="employee">Employee</option>
               <option value="student">Student</option>
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Search CRM person</label>
+            <label className="block text-xs font-medium text-glass-muted mb-1">Search CRM person</label>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type a name…"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              className="w-full glass-input px-3 py-2 text-sm" />
             {query && filtered.length > 0 && !selected && (
               <div className="mt-1 max-h-40 overflow-y-auto border border-slate-200 rounded-lg bg-white shadow-sm">
                 {filtered.slice(0, 25).map((c) => (
@@ -540,13 +540,13 @@ function DevicePersonRow({ person, onChanged }) {
             {selected && <div className="mt-1 text-xs text-emerald-600">Selected: {selected.name}</div>}
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Display name</label>
+            <label className="block text-xs font-medium text-glass-muted mb-1">Display name</label>
             <input value={displayName} onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              className="w-full glass-input px-3 py-2 text-sm" />
           </div>
           <div className="flex gap-2">
             <button onClick={save} disabled={busy || !selected}
-              className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">
+              className="glass-btn px-4 py-2 text-sm font-medium disabled:opacity-40">
               {busy ? 'Saving…' : 'Save'}
             </button>
             {person.is_mapped && (
