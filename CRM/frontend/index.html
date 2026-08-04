@@ -4,12 +4,40 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#1e40af" />
+    <meta name="theme-color" content="#1d1d1f" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>We One Aviation CRM</title>
   </head>
   <body>
+    <!--
+      Authentic Liquid Glass refraction filters. A near-static noise displacement
+      map bends the backdrop behind translucent chrome (nav / tab bar / modal
+      overlay). Rendered only by Chromium in backdrop-filter; Safari/Firefox fall
+      back to plain frosted blur (see .glass-refract in index.css). Zero layout /
+      CLS cost: the SVG is 0x0 and absolutely positioned, aria-hidden from AT.
+    -->
+    <svg class="lg-filter-defs" width="0" height="0" aria-hidden="true" focusable="false"
+         style="position:absolute;width:0;height:0;overflow:hidden;pointer-events:none">
+      <defs>
+        <filter id="liquid-glass-refraction" x="-12%" y="-12%" width="124%" height="124%"
+                color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.006 0.011" numOctaves="2"
+                        seed="11" result="noise" />
+          <feGaussianBlur in="noise" stdDeviation="1.3" result="softNoise" />
+          <feDisplacementMap in="SourceGraphic" in2="softNoise" scale="16"
+                             xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+        <filter id="liquid-glass-refraction-sm" x="-12%" y="-12%" width="124%" height="124%"
+                color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.014" numOctaves="2"
+                        seed="4" result="noise" />
+          <feGaussianBlur in="noise" stdDeviation="1.1" result="softNoise" />
+          <feDisplacementMap in="SourceGraphic" in2="softNoise" scale="9"
+                             xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </defs>
+    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

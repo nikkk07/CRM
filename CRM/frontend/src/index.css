@@ -358,6 +358,75 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   .glass-table td { padding: 0.85rem 1.1rem; }
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   Authentic Liquid Glass — refraction + specular (v5 enhancement)
+   -----------------------------------------------------------------
+   The v4 system used frosted blur only. This layer adds true Apple
+   "Liquid Glass" refraction (SVG feDisplacementMap, defs in index.html)
+   and a brighter specular rim to the TRANSLUCENT CHROME only:
+   nav, tab bar, and modal overlay. Content cards stay solid white.
+
+   Safari-safe by construction: refraction lives on an isolated ::before
+   whose backdrop-filter uses url(#…). Chromium renders the displacement;
+   Safari/Firefox can't parse url() in backdrop-filter, drop the pseudo's
+   filter entirely (the pseudo is purely decorative), and keep the
+   element's own frosted blur untouched. No JS, no layout, no CLS.
+
+   Perf budget: at most nav + tabs refract at once (2 layers); the overlay
+   adds a 3rd only while a modal is open — well under the ~5–6 layer ceiling.
+   Refraction is STATIC (no animated turbulence) so it costs nothing on
+   scroll and needs no reduced-motion handling.
+   ═══════════════════════════════════════════════════════════════ */
+.glass-nav, .glass-tabs { isolation: isolate; }
+
+.glass-nav::before,
+.glass-tabs::before,
+.glass-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;                       /* above the element's own tint, below its content */
+  border-radius: inherit;
+  pointer-events: none;
+  /* Chromium: refract the already-frosted backdrop. Other engines ignore this
+     whole declaration (invalid url() function) and simply show no pseudo. */
+  backdrop-filter: url(#liquid-glass-refraction);
+}
+.glass-overlay::before { backdrop-filter: url(#liquid-glass-refraction-sm); }
+
+/* Brighter, two-stop specular rim — the "wet edge" that reads as liquid glass. */
+.glass-nav {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18),
+              inset 0 -1px 0 rgba(255,255,255,0.04);
+}
+.glass-tabs {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7),
+              inset 0 -1px 0 rgba(0,0,0,0.02);
+}
+.glass-strong { box-shadow: var(--shadow-lg), var(--specular); }
+
+/* ── WCAG AA contrast fixes (v5) ──────────────────────────────────
+   Measured pairs that fell just short of AA on the light surfaces:
+   • table headers  #6e6e73 on #eeeef0 = 4.38:1  → #636368 = 5.16:1 ✓
+   • input placeholder #86868b on #fff = 3.62:1  → tertiary = 5.07:1 ✓
+   Everything else already grades AA/AAA. */
+.glass-table th { color: #636368; }
+.glass-input::placeholder { color: var(--text-tertiary); }
+
+/* Opt-in specular sweep, matching liquidglass-tailwind's .glass-shine gradient.
+   Use on non-repeating, overflow-safe accents (hero CTA, a single feature card). */
+.glass-shine { position: relative; overflow: hidden; }
+.glass-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(135deg,
+    rgba(255,255,255,0.25) 0%, transparent 40%,
+    transparent 60%, rgba(255,255,255,0.05) 100%);
+}
+
 /* ═══ Accessibility: honour reduced-motion — kill transforms/anims ═══ */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -367,4 +436,28 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
     scroll-behavior: auto !important;
   }
   .glass-card:hover, .glass-stat:hover { transform: none; }
+}
+
+/* ═══ Accessibility: honour reduced-transparency — drop glass for opacity ═══
+   (New in v5 — the previous system had no reduced-transparency path.) Users who
+   ask the OS to reduce transparency get solid, high-contrast chrome instead of
+   frosted glass, with the refraction pseudo removed entirely. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass-nav::before, .glass-tabs::before, .glass-overlay::before { display: none; }
+  .glass-nav {
+    background: #1d1d1f;
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .glass-tabs {
+    background: var(--surface-base);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .glass-overlay {
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .liquid-glass {
+    background: var(--surface-elevated);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
 }
