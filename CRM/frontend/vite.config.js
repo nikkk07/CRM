@@ -6,5 +6,18 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3000
+  },
+  build: {
+    target: 'es2020',
+    // Split React out of the app code into its own long-lived, cacheable chunk.
+    // App code changes far more often than React does, so returning visitors
+    // re-download only the small app chunk, not the framework.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+        },
+      },
+    },
   }
 });

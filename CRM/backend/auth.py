@@ -56,7 +56,11 @@ def authenticate_employee(login_id: str, password: str):
     del emp["password_hash"]
     return emp
 
-async def get_current_employee(credentials: HTTPAuthorizationCredentials = Depends(security)):
+# NOTE: intentionally a *sync* dependency. It does a blocking psycopg query, so
+# declaring it `def` lets FastAPI run it in its worker threadpool instead of on
+# the event loop. As `async def` it blocked the single Render worker's event
+# loop on every authenticated request, serializing all traffic.
+def get_current_employee(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -92,7 +96,7 @@ async def get_current_employee(credentials: HTTPAuthorizationCredentials = Depen
         }
 
 
-async def get_current_student(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def get_current_student(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Validate a student JWT. Rejects anything that is not a type='student' token,
     so employee tokens can never reach a student endpoint."""
     token = credentials.credentials

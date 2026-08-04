@@ -1,27 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import Login from './components/Login';
 import EmployeeLogin from './components/EmployeeLogin';
 import StudentLogin from './components/StudentLogin';
-import StudentPortal from './components/StudentPortal';
 import LeadList from './components/LeadList';
-import LeadDetail from './components/LeadDetail';
-import Outbox from './components/Outbox';
-import TaskBoard from './components/TaskBoard';
-import EmployeeDirectory from './components/EmployeeDirectory';
-import MyProfile from './components/MyProfile';
-import LeaveCalendar from './components/LeaveCalendar';
-import PolicyDocs from './components/PolicyDocs';
-import AddQuery from './components/AddQuery';
-import StudentDirectory from './components/StudentDirectory';
-import Attendance from './components/Attendance';
-import { syncData, API_URL } from './api';
+import LoadingSpinner from './components/LoadingSpinner';
+import { apiFetch, fetchConfig, API_URL } from './api';
+
+// Code-split everything that isn't needed for the first paint. Each of these
+// tabs/modals now ships as its own chunk fetched on demand, so a Sales user
+// never downloads the 700-line Attendance view, etc. Cuts the initial bundle.
+const StudentPortal = lazy(() => import('./components/StudentPortal'));
+const LeadDetail = lazy(() => import('./components/LeadDetail'));
+const Outbox = lazy(() => import('./components/Outbox'));
+const TaskBoard = lazy(() => import('./components/TaskBoard'));
+const EmployeeDirectory = lazy(() => import('./components/EmployeeDirectory'));
+const MyProfile = lazy(() => import('./components/MyProfile'));
+const LeaveCalendar = lazy(() => import('./components/LeaveCalendar'));
+const PolicyDocs = lazy(() => import('./components/PolicyDocs'));
+const AddQuery = lazy(() => import('./components/AddQuery'));
+const StudentDirectory = lazy(() => import('./components/StudentDirectory'));
+const Attendance = lazy(() => import('./components/Attendance'));
 
 export default function App() {
   const [employee, setEmployee] = useState(null);
   const [showEmployeeLogin, setShowEmployeeLogin] = useState(false);
   const [student, setStudent] = useState(null);
   const [showStudentLogin, setShowStudentLogin] = useState(false);
-  const [lastSync, setLastSync] = useState(null);
   const [leads, setLeads] = useState([]);
   const [leadsError, setLeadsError] = useState('');
   const [followups, setFollowups] = useState([]);
@@ -30,7 +34,6 @@ export default function App() {
   const [showAddQuery, setShowAddQuery] = useState(false);
   const [config, setConfig] = useState({});
   const [activeTab, setActiveTab] = useState('leads');
-  const [slaMinutes, setSlaMinutes] = useState(15);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ old_password: '', new_password: '', confirm_password: '' });
   const [passwordError, setPasswordError] = useState('');
@@ -51,6 +54,9 @@ export default function App() {
     if (studentToken && studentStr) { setStudent(JSON.parse(studentStr)); }
   }, []);
 
+  // Poll only the live data (leads + follow-ups). This used to also pull the
+  // heavy /api/sync snapshot (all employees + 500 leads + 1000 contact attempts)
+  // every 60s and throw almost all of it away — pure wasted bandwidth/CPU.
   useEffect(() => {
     if (employee) {
       syncNow();
@@ -59,34 +65,38 @@ export default function App() {
     }
   }, [employee]);
 
+  // Config barely ever changes, so load it once per session instead of on every
+  // poll. Only lead-capable roles can open AddQuery (its only consumer).
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!employee || !token) return;
+    if (isEmployeeSession && !canAccessLeads) return;
+    fetchConfig(token).then(setConfig).catch(() => { /* keep defaults */ });
+  }, [employee]);
+
   const syncNow = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const shouldFetchLeads = !isEmployeeSession || canAccessLeads;
+    if (!shouldFetchLeads) return;
     try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      const shouldFetchLeads = !isEmployeeSession || canAccessLeads;
-      if (shouldFetchLeads) {
-        const leadsRes = await fetch(`${API_URL}/api/leads`, { headers: { 'Authorization': `Bearer ${token}` } });
-        if (leadsRes.ok) {
-          const leadsData = await leadsRes.json();
-          setLeads(leadsData); setLeadsError('');
-          const followupsRes = await fetch(`${API_URL}/api/followups/pending`, { headers: { 'Authorization': `Bearer ${token}` } });
-          if (followupsRes.ok) setFollowups(await followupsRes.json());
-        } else {
-          let detail = '';
-          try { detail = (await leadsRes.json()).detail || ''; } catch { }
-          setLeadsError(`Server error (HTTP ${leadsRes.status})${detail ? `: ${detail}` : ''}. Data was not loaded.`);
-        }
+      // Fetch leads + pending follow-ups concurrently (was sequential).
+      const [leadsRes, followupsRes] = await Promise.all([
+        apiFetch('/api/leads', { token }),
+        apiFetch('/api/followups/pending', { token }),
+      ]);
+      if (leadsRes.ok) {
+        setLeads(await leadsRes.json()); setLeadsError('');
+      } else {
+        let detail = '';
+        try { detail = (await leadsRes.json()).detail || ''; } catch { }
+        setLeadsError(`Server error (HTTP ${leadsRes.status})${detail ? `: ${detail}` : ''}. Data was not loaded.`);
+        return;
       }
-      if (!isEmployeeSession) {
-        const snapshot = await syncData(token);
-        setLastSync(new Date(snapshot.synced_at));
-        setConfig(snapshot.config || {});
-        if (snapshot.config.sla_first_response_minutes) setSlaMinutes(parseInt(snapshot.config.sla_first_response_minutes));
-      }
+      if (followupsRes.ok) setFollowups(await followupsRes.json());
     } catch (err) {
       console.error('Sync failed:', err);
-      if (err && err.status) setLeadsError(`Server error (HTTP ${err.status})${err.detail ? `: ${err.detail}` : ''}. Data was not loaded.`);
-      else setLeadsError('Could not reach the server. Check your connection and retry.');
+      setLeadsError('Could not reach the server. Check your connection and retry.');
     }
   };
 
@@ -119,7 +129,11 @@ export default function App() {
     } catch (error) { setPasswordError('Failed to change password'); }
   };
 
-  if (student && !employee) return <StudentPortal onLogout={handleStudentLogout} />;
+  if (student && !employee) return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <StudentPortal onLogout={handleStudentLogout} />
+    </Suspense>
+  );
   if (!employee) {
     if (showStudentLogin) return <StudentLogin onLogin={setStudent} onBack={() => setShowStudentLogin(false)} />;
     return showEmployeeLogin ? <EmployeeLogin onLogin={setEmployee} /> : <Login onLogin={setEmployee} onSwitchToEmployee={() => setShowEmployeeLogin(true)} onSwitchToStudent={() => setShowStudentLogin(true)} />;
@@ -203,18 +217,22 @@ export default function App() {
           </>
         )}
 
-        {activeTab === 'students' && canAccessLeads && <StudentDirectory />}
-        {activeTab === 'tasks' && <TaskBoard />}
-        {activeTab === 'attendance' && canAccessCameras && <Attendance />}
-        {activeTab === 'team' && canAccessDirectory && <EmployeeDirectory />}
-        {activeTab === 'policy' && department === 'Admin' && <PolicyDocs />}
-        {activeTab === 'profile' && isEmployeeSession && <MyProfile />}
-        {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
+        <Suspense fallback={<LoadingSpinner />}>
+          {activeTab === 'students' && canAccessLeads && <StudentDirectory />}
+          {activeTab === 'tasks' && <TaskBoard />}
+          {activeTab === 'attendance' && canAccessCameras && <Attendance />}
+          {activeTab === 'team' && canAccessDirectory && <EmployeeDirectory />}
+          {activeTab === 'policy' && department === 'Admin' && <PolicyDocs />}
+          {activeTab === 'profile' && isEmployeeSession && <MyProfile />}
+          {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
+        </Suspense>
       </div>
 
-      {selectedLead && <LeadDetail lead={selectedLead} onClose={() => setSelectedLead(null)} onContact={handleContact} />}
-      {showOutbox && <Outbox onClose={() => setShowOutbox(false)} />}
-      {showAddQuery && <AddQuery requiredQualification={config.eligibility_required_qualification || '12th with Physics & Maths'} onClose={() => setShowAddQuery(false)} onCreated={() => { setShowAddQuery(false); syncNow(); }} onOpenExisting={(leadId) => { setShowAddQuery(false); const existing = leads.find(l => l.id === leadId); if (existing) setSelectedLead(existing); }} />}
+      <Suspense fallback={null}>
+        {selectedLead && <LeadDetail lead={selectedLead} onClose={() => setSelectedLead(null)} onContact={handleContact} />}
+        {showOutbox && <Outbox onClose={() => setShowOutbox(false)} />}
+        {showAddQuery && <AddQuery requiredQualification={config.eligibility_required_qualification || '12th with Physics & Maths'} onClose={() => setShowAddQuery(false)} onCreated={() => { setShowAddQuery(false); syncNow(); }} onOpenExisting={(leadId) => { setShowAddQuery(false); const existing = leads.find(l => l.id === leadId); if (existing) setSelectedLead(existing); }} />}
+      </Suspense>
 
       {showChangePassword && (
         <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">

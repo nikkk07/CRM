@@ -323,29 +323,49 @@ async def register(req: EmployeeCreate, current_emp = Depends(get_current_employ
 async def me(current_emp = Depends(get_current_employee)):
     return current_emp
 
+@app.get("/api/config")
+def get_config(current_emp = Depends(get_current_employee)):  # sync → threadpool
+    """Slim endpoint: just the config key/value map. The frontend used to pull
+    this out of the heavy /api/sync snapshot (employees + 500 leads + 1000
+    contact attempts) on every 60s poll and discard everything else. Config
+    rarely changes, so the app now loads it once from here instead."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT key, value FROM config")
+        return {r[0]: r[1] for r in cur.fetchall()}
+
 @app.post("/api/leads/ingest")
 async def ingest_lead_endpoint(data: dict):
     result = ingest_lead(data)
     return result
 
 @app.get("/api/leads")
-async def get_leads(current_emp = Depends(get_current_employee)):
+def get_leads(current_emp = Depends(get_current_employee)):  # sync → runs in threadpool (blocking DB)
     # Access: Admin or Sales only
     if current_emp['department'] not in ['Admin', 'Sales']:
         raise HTTPException(status_code=403, detail="Lead access requires Admin or Sales department")
     
     with get_db() as conn:
         cur = conn.cursor()
+        # not_reachable_count via a single grouped LEFT JOIN instead of a
+        # correlated per-row subquery (one index scan for the whole result set
+        # rather than one lookup per lead).
         cur.execute("""
             SELECT l.id, l.name, l.phone, l.email, l.address, l.course_interest,
                    l.utm_source, l.utm_medium, l.utm_campaign, l.status, l.assigned_to,
                    l.created_at, l.first_contacted_at, l.dedup_key, l.last_note,
                    COALESCE(l.parked, FALSE) as parked, COALESCE(l.closed, FALSE) as closed,
-                   (SELECT COUNT(*) FROM contact_attempt WHERE lead_id = l.id AND disposition = 'Not reachable') as not_reachable_count,
+                   COALESCE(nr.cnt, 0) as not_reachable_count,
                    EXTRACT(EPOCH FROM (NOW() - l.created_at))/60 as age_minutes,
                    l.closure_outcome, l.guardian_name, l.qualifications, l.is_eligible, l.nios_interested,
                    l.interest_track
             FROM lead l
+            LEFT JOIN (
+                SELECT lead_id, COUNT(*) AS cnt
+                FROM contact_attempt
+                WHERE disposition = 'Not reachable'
+                GROUP BY lead_id
+            ) nr ON nr.lead_id = l.id
             ORDER BY l.created_at DESC
         """)
         leads = []
@@ -522,7 +542,7 @@ async def create_followup(lead_id: str, data: dict, current_emp = Depends(get_cu
     return {"id": str(followup_id)}
 
 @app.get("/api/followups/pending")
-async def get_pending_followups(current_emp = Depends(get_current_employee)):
+def get_pending_followups(current_emp = Depends(get_current_employee)):  # sync → threadpool
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
@@ -734,7 +754,7 @@ async def mark_outbox_sent(message_id: str, current_emp = Depends(get_current_em
     return {"status": "sent"}
 
 @app.get("/api/sync")
-async def sync_snapshot(current_emp = Depends(get_current_employee)):
+def sync_snapshot(current_emp = Depends(get_current_employee)):  # sync → threadpool
     with get_db() as conn:
         cur = conn.cursor()
         
@@ -807,7 +827,7 @@ async def sync_snapshot(current_emp = Depends(get_current_employee)):
     }
 
 @app.get("/api/tasks")
-async def get_tasks(current_emp = Depends(get_current_employee)):
+def get_tasks(current_emp = Depends(get_current_employee)):  # sync → threadpool
     with get_db() as conn:
         cur = conn.cursor()
         
