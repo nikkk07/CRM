@@ -24,6 +24,12 @@ const ROLE_FILTERS = [
 
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
+// Only the Admin department may edit/override a day. Same idiom as the rest of the app.
+const isAdmin = () => {
+  try { return JSON.parse(localStorage.getItem('employee') || '{}').department === 'Admin'; }
+  catch { return false; }
+};
+
 const roleBadge = (role) => (
   <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
     ROLE_BADGE[role] || ROLE_BADGE.student
@@ -202,10 +208,7 @@ function DayView() {
                 <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Entry</th>
                 <th className="px-4 py-3">Exit</th>
-                <th className="px-4 py-3">Hours</th>
-                <th className="px-4 py-3">Day Status</th>
                 <th className="px-4 py-3">Presence</th>
-                <th className="px-4 py-3 text-right">Edit</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -214,7 +217,7 @@ function DayView() {
               ))}
               {!loading && filteredRows.length === 0 && !error && (
                 <tr>
-                  <td colSpan="8" className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan="5" className="px-4 py-10 text-center text-slate-400">
                     {rows.length > 0
                       ? 'No people match this role filter.'
                       : isSunday
@@ -224,23 +227,20 @@ function DayView() {
                 </tr>
               )}
               {loading && (
-                <tr><td colSpan="8" className="px-4 py-10 text-center text-slate-400">Loading…</td></tr>
+                <tr><td colSpan="5" className="px-4 py-10 text-center text-slate-400">Loading…</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
-      <p className="text-xs text-glass-muted">
-        <span className="font-medium">Day Status</span> comes from hours worked (≥7h full, ≥4h half,
-        below that “short”, no exit “missing”). Short / Missing days need a human to review — use
-        <span className="font-medium"> Edit</span> to fix the times or override the status. A “•” marks a manual override.
-      </p>
     </div>
   );
 }
 
-// One attendance row with an Admin-only inline editor (fix times / override status).
-// The whole Attendance view is already Admin-gated; the PATCH also enforces it.
+// One attendance row. The table shows only Name/Role/Entry/Exit/Presence; clicking
+// an Admin's row opens the inline editor to fix times / override the day status
+// (hours + day status live in the Month view and employee profile). Non-Admins get
+// a plain, non-clickable row. The PATCH endpoint also enforces Admin server-side.
 function DayRow({ row, onChanged }) {
   const [editing, setEditing] = useState(false);
   const [entry, setEntry] = useState(row.entry_time || '');
@@ -279,17 +279,18 @@ function DayRow({ row, onChanged }) {
     }
   };
 
+  const clickable = isAdmin() && row.record_id != null;
+
   return (
     <Fragment>
-      <tr className="hover:bg-slate-50">
+      <tr
+        onClick={clickable ? (editing ? () => setEditing(false) : open) : undefined}
+        className={clickable ? 'cursor-pointer hover:bg-slate-50' : ''}
+      >
         <td className="px-4 py-3 font-medium text-glass-primary">{row.name}</td>
         <td className="px-4 py-3">{roleBadge(normRole(row.role))}</td>
         <td className="px-4 py-3 tabular-nums">{row.entry_time || '—'}</td>
         <td className="px-4 py-3 tabular-nums">{row.exit_time || '—'}</td>
-        <td className="px-4 py-3 tabular-nums">{row.hours_worked != null ? `${row.hours_worked}h` : '—'}</td>
-        <td className="px-4 py-3">
-          {dayStatusBadge(row.effective_status, !!row.status_override)}
-        </td>
         <td className="px-4 py-3">
           {row.exit_time ? (
             <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">Left</span>
@@ -297,18 +298,10 @@ function DayRow({ row, onChanged }) {
             <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Inside</span>
           )}
         </td>
-        <td className="px-4 py-3 text-right">
-          {row.record_id != null && (
-            <button onClick={editing ? () => setEditing(false) : open}
-              className="px-3 py-1 text-xs font-medium bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
-              {editing ? 'Close' : 'Edit'}
-            </button>
-          )}
-        </td>
       </tr>
       {editing && (
         <tr className="bg-slate-50/60">
-          <td colSpan="8" className="px-4 py-3">
+          <td colSpan="5" className="px-4 py-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-end">
               <div>
                 <label className="block text-xs font-medium text-glass-muted mb-1">Entry (HH:MM:SS)</label>
