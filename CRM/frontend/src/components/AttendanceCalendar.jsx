@@ -58,6 +58,21 @@ export default function AttendanceCalendar({
     paid_leave: 'bg-blue-100 text-blue-800 border-blue-300',
   };
 
+  // Biometric day-status colours. short_day / missing_exit are review states and
+  // get a distinct warning colour so they are never mistaken for a full day.
+  const ATT_STATUS_COLORS = {
+    full_day: 'bg-green-100 text-green-800 border-green-300 font-bold',
+    half_day: 'bg-yellow-100 text-yellow-800 border-yellow-300 font-bold',
+    short_day: 'bg-orange-100 text-orange-800 border-orange-300 font-semibold',
+    missing_exit: 'bg-red-100 text-red-700 border-red-300 font-semibold',
+    absent: 'bg-rose-100 text-rose-700 border-rose-300',
+    leave: 'bg-blue-100 text-blue-800 border-blue-300',
+  };
+  const ATT_STATUS_LABEL = {
+    full_day: 'Full day', half_day: 'Half day', short_day: 'Short day (review)',
+    missing_exit: 'Missing exit (review)', absent: 'Absent', leave: 'Leave',
+  };
+
   const dateStrFor = (day) =>
     `${year}-${String(monthIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
@@ -145,10 +160,13 @@ Enter 1, 2, or 3:`);
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {[
           { label: 'Days Present', value: fmt(summary.days_present), cls: 'text-green-700' },
-          { label: 'Days Absent', value: fmt(summary.days_absent), cls: 'text-orange-700' },
+          { label: 'Full Days', value: fmt(summary.full_days), cls: 'text-green-700' },
+          { label: 'Half Days', value: fmt(summary.half_days), cls: 'text-yellow-700' },
+          { label: 'Needs Review', value: fmt(summary.days_needing_review), cls: 'text-orange-700' },
+          { label: 'Days Absent', value: fmt(summary.days_absent), cls: 'text-rose-700' },
           { label: 'Total Hours', value: summary.total_hours != null ? summary.total_hours : '—', cls: 'text-glass-primary' },
           { label: 'Avg Entry', value: fmt(summary.average_entry_time), cls: 'text-glass-primary' },
           { label: 'Avg Exit', value: fmt(summary.average_exit_time), cls: 'text-glass-primary' },
@@ -176,10 +194,14 @@ Enter 1, 2, or 3:`);
         </div>
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-green-200"></span>
-          <span>Present</span>
+          <span>Full day</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-orange-200"></span>
+          <span>Short / Missing (review)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-4 rounded bg-rose-200"></span>
           <span>Absent</span>
         </div>
         <div className="flex items-center gap-2">
@@ -198,6 +220,7 @@ Enter 1, 2, or 3:`);
 
           const leaveType = getDayLeaveType(day);
           const att = attByDate[dateStrFor(day)];
+          const attStatus = att?.status;
           const present = mapped && att && att.entry_time;
           const sunday = isSunday(day);
           const future = isFuture(day);
@@ -207,7 +230,13 @@ Enter 1, 2, or 3:`);
           let tooltip = null;
           if (leaveType) {
             cellCls = LEAVE_TYPE_COLORS[leaveType];
+          } else if (att && attStatus && ATT_STATUS_COLORS[attStatus]) {
+            cellCls = ATT_STATUS_COLORS[attStatus];
+            tooltip = `In: ${att.entry_time || '—'} · Out: ${att.exit_time || '—'}` +
+              (att.hours_worked != null ? ` · ${att.hours_worked}h` : '') +
+              ` · ${ATT_STATUS_LABEL[attStatus] || attStatus}`;
           } else if (present) {
+            // status not yet computed (e.g. old row) — still show as present.
             cellCls = 'bg-green-100 text-green-800 border-green-300 font-bold';
             tooltip = `In: ${att.entry_time || '—'} · Out: ${att.exit_time || '—'}` +
               (att.hours_worked != null ? ` · ${att.hours_worked}h` : '');

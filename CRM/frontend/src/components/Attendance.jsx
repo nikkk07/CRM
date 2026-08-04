@@ -30,6 +30,37 @@ const roleBadge = (role) => (
   }`}>{role}</span>
 );
 
+// Day-status classification. short_day / missing_exit are REVIEW states — shown
+// in distinct warning colours, never hidden or treated as a plain full day.
+const DAY_STATUS_META = {
+  full_day:     { label: 'Full Day',     cls: 'bg-green-100 text-green-800' },
+  half_day:     { label: 'Half Day',     cls: 'bg-yellow-100 text-yellow-800' },
+  short_day:    { label: 'Short Day',    cls: 'bg-orange-100 text-orange-800' },
+  missing_exit: { label: 'Missing Exit', cls: 'bg-red-100 text-red-700' },
+  absent:       { label: 'Absent',       cls: 'bg-rose-100 text-rose-700' },
+  leave:        { label: 'Leave',        cls: 'bg-blue-100 text-blue-800' },
+};
+
+const dayStatusBadge = (status, overridden) => {
+  const meta = DAY_STATUS_META[status];
+  if (!meta) return <span className="text-slate-400">—</span>;
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${meta.cls}`}
+      title={overridden ? 'Manually overridden by Admin' : undefined}>
+      {meta.label}{overridden ? ' •' : ''}
+    </span>
+  );
+};
+
+// Values Admin can force via the override dropdown ('' = clear / use computed).
+const OVERRIDE_OPTIONS = [
+  { value: '', label: '(auto — from times)' },
+  { value: 'full_day', label: 'Full Day' },
+  { value: 'half_day', label: 'Half Day' },
+  { value: 'absent', label: 'Absent' },
+  { value: 'leave', label: 'Leave' },
+];
+
 export default function Attendance() {
   const [view, setView] = useState('day'); // 'day' | 'month' | 'devices'
 
@@ -124,11 +155,12 @@ function DayView() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         {[
           { label: 'Marked present', value: data ? data.present : '—' },
           { label: 'Currently inside', value: data ? data.inside : '—', accent: 'text-emerald-600' },
           { label: 'Left for the day', value: data ? data.present - data.inside : '—', accent: 'text-glass-muted' },
+          { label: 'Needs review', value: data ? (data.needs_review ?? 0) : '—', accent: 'text-orange-600' },
           { label: 'Visitors today', value: data ? visitorCount : '—', accent: 'text-purple-600' },
           { label: 'Date', value: date, small: true },
         ].map((c) => (
@@ -170,28 +202,19 @@ function DayView() {
                 <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Entry</th>
                 <th className="px-4 py-3">Exit</th>
-                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Hours</th>
+                <th className="px-4 py-3">Day Status</th>
+                <th className="px-4 py-3">Presence</th>
+                <th className="px-4 py-3 text-right">Edit</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredRows.map((r) => (
-                <tr key={r.person_id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-glass-primary">{r.name}</td>
-                  <td className="px-4 py-3">{roleBadge(normRole(r.role))}</td>
-                  <td className="px-4 py-3 tabular-nums">{r.entry_time || '—'}</td>
-                  <td className="px-4 py-3 tabular-nums">{r.exit_time || '—'}</td>
-                  <td className="px-4 py-3">
-                    {r.exit_time ? (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">Left</span>
-                    ) : (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Inside</span>
-                    )}
-                  </td>
-                </tr>
+                <DayRow key={r.record_id ?? r.person_id} row={r} onChanged={() => load(date)} />
               ))}
               {!loading && filteredRows.length === 0 && !error && (
                 <tr>
-                  <td colSpan="5" className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan="8" className="px-4 py-10 text-center text-slate-400">
                     {rows.length > 0
                       ? 'No people match this role filter.'
                       : isSunday
@@ -201,13 +224,129 @@ function DayView() {
                 </tr>
               )}
               {loading && (
-                <tr><td colSpan="5" className="px-4 py-10 text-center text-slate-400">Loading…</td></tr>
+                <tr><td colSpan="8" className="px-4 py-10 text-center text-slate-400">Loading…</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+      <p className="text-xs text-glass-muted">
+        <span className="font-medium">Day Status</span> comes from hours worked (≥7h full, ≥4h half,
+        below that “short”, no exit “missing”). Short / Missing days need a human to review — use
+        <span className="font-medium"> Edit</span> to fix the times or override the status. A “•” marks a manual override.
+      </p>
     </div>
+  );
+}
+
+// One attendance row with an Admin-only inline editor (fix times / override status).
+// The whole Attendance view is already Admin-gated; the PATCH also enforces it.
+function DayRow({ row, onChanged }) {
+  const [editing, setEditing] = useState(false);
+  const [entry, setEntry] = useState(row.entry_time || '');
+  const [exit, setExit] = useState(row.exit_time || '');
+  const [override, setOverride] = useState(row.status_override || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const open = () => {
+    setEntry(row.entry_time || '');
+    setExit(row.exit_time || '');
+    setOverride(row.status_override || '');
+    setErr('');
+    setEditing(true);
+  };
+
+  const save = async () => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch(`${API_URL}/api/attendance/${row.record_id}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entry_time: entry.trim() || null,
+          exit_time: exit.trim() || null,
+          status_override: override || null,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+      setEditing(false);
+      onChanged();
+    } catch (e) {
+      setErr(typeof e.message === 'string' ? e.message : 'Save failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Fragment>
+      <tr className="hover:bg-slate-50">
+        <td className="px-4 py-3 font-medium text-glass-primary">{row.name}</td>
+        <td className="px-4 py-3">{roleBadge(normRole(row.role))}</td>
+        <td className="px-4 py-3 tabular-nums">{row.entry_time || '—'}</td>
+        <td className="px-4 py-3 tabular-nums">{row.exit_time || '—'}</td>
+        <td className="px-4 py-3 tabular-nums">{row.hours_worked != null ? `${row.hours_worked}h` : '—'}</td>
+        <td className="px-4 py-3">
+          {dayStatusBadge(row.effective_status, !!row.status_override)}
+        </td>
+        <td className="px-4 py-3">
+          {row.exit_time ? (
+            <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">Left</span>
+          ) : (
+            <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Inside</span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-right">
+          {row.record_id != null && (
+            <button onClick={editing ? () => setEditing(false) : open}
+              className="px-3 py-1 text-xs font-medium bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
+              {editing ? 'Close' : 'Edit'}
+            </button>
+          )}
+        </td>
+      </tr>
+      {editing && (
+        <tr className="bg-slate-50/60">
+          <td colSpan="8" className="px-4 py-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-end">
+              <div>
+                <label className="block text-xs font-medium text-glass-muted mb-1">Entry (HH:MM:SS)</label>
+                <input value={entry} onChange={(e) => setEntry(e.target.value)} placeholder="09:00:00"
+                  className="w-full glass-input px-3 py-2 text-sm tabular-nums" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-glass-muted mb-1">Exit (HH:MM:SS)</label>
+                <input value={exit} onChange={(e) => setExit(e.target.value)} placeholder="17:00:00"
+                  className="w-full glass-input px-3 py-2 text-sm tabular-nums" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-glass-muted mb-1">Override status</label>
+                <select value={override} onChange={(e) => setOverride(e.target.value)}
+                  className="w-full glass-input px-3 py-2 text-sm">
+                  {OVERRIDE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={save} disabled={busy}
+                  className="glass-btn px-4 py-2 text-sm font-medium disabled:opacity-40">
+                  {busy ? 'Saving…' : 'Save'}
+                </button>
+                <button onClick={() => setEditing(false)}
+                  className="px-3 py-2 text-sm font-medium bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
+              </div>
+              {err && <div className="sm:col-span-2 lg:col-span-4 text-xs text-rose-600">{err}</div>}
+              <p className="sm:col-span-2 lg:col-span-4 text-xs text-glass-muted">
+                Editing times recomputes the day status. An override forces the status regardless of times.
+                Clearing both times leaves the day as “missing exit”.
+              </p>
+            </div>
+          </td>
+        </tr>
+      )}
+    </Fragment>
   );
 }
 
@@ -243,16 +382,20 @@ function MonthView() {
   const people = data?.people || [];
 
   const exportCsv = () => {
-    const header = ['Name', 'Role', 'Days Present', 'First Seen', 'Last Seen', 'Date', 'Entry', 'Exit'];
+    const header = ['Name', 'Role', 'Days Present', 'Full Days', 'Half Days', 'Needs Review',
+      'First Seen', 'Last Seen', 'Date', 'Entry', 'Exit', 'Hours', 'Status'];
     const lines = [header.join(',')];
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const statusLabel = (s) => DAY_STATUS_META[s]?.label || '';
     people.forEach((p) => {
+      const summary = [p.name, p.role, p.days_present, p.full_days ?? '', p.half_days ?? '',
+        p.days_needing_review ?? '', p.first_seen, p.last_seen];
       if (!p.days.length) {
-        lines.push([p.name, p.role, p.days_present, p.first_seen, p.last_seen, '', '', ''].map(esc).join(','));
+        lines.push([...summary, '', '', '', '', ''].map(esc).join(','));
       }
       p.days.forEach((d) => {
-        lines.push([p.name, p.role, p.days_present, p.first_seen, p.last_seen,
-          d.date, d.entry_time || '', d.exit_time || ''].map(esc).join(','));
+        lines.push([...summary, d.date, d.entry_time || '', d.exit_time || '',
+          d.hours_worked ?? '', statusLabel(d.status)].map(esc).join(','));
       });
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
@@ -317,12 +460,21 @@ function MonthView() {
                     <tr className="bg-slate-50/60">
                       <td></td>
                       <td colSpan="5" className="px-4 py-3">
+                        <div className="mb-2 flex flex-wrap gap-3 text-xs text-glass-muted">
+                          <span>Full days: <span className="font-semibold text-green-700">{p.full_days ?? 0}</span></span>
+                          <span>Half days: <span className="font-semibold text-yellow-700">{p.half_days ?? 0}</span></span>
+                          <span>Needs review: <span className="font-semibold text-orange-700">{p.days_needing_review ?? 0}</span></span>
+                        </div>
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                           {p.days.map((d) => (
                             <div key={d.date} className="text-xs glass-subtle rounded-lg px-3 py-2">
-                              <div className="font-medium text-slate-700">{d.date}</div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-slate-700">{d.date}</span>
+                                {dayStatusBadge(d.status, false)}
+                              </div>
                               <div className="tabular-nums text-glass-muted">
                                 {(d.entry_time || '—')} → {(d.exit_time || '—')}
+                                {d.hours_worked != null ? ` · ${d.hours_worked}h` : ''}
                               </div>
                             </div>
                           ))}

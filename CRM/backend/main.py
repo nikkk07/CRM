@@ -40,6 +40,18 @@ ATTENDANCE_RETENTION_MONTHS = 3
 # is more than this many days in the past (or more than 1 day in the future).
 HIKVISION_MAX_EVENT_AGE_DAYS = 2
 
+# An accidental double-tap on the terminal (seconds apart) must NOT turn a fresh
+# entry into an exit, nor keep overwriting the exit. Ignore any punch landing
+# within this many minutes of an already-recorded entry or exit for the day.
+ATTENDANCE_MIN_PUNCH_GAP_MINUTES = 5
+
+# Day-status thresholds. A full shift is SHIFT_HOURS; anything at/above
+# FULL_DAY_MIN_HOURS counts as a full day, at/above HALF_DAY_MIN_HOURS as a half
+# day. These only classify a day for reporting — they do NOT affect pay here.
+SHIFT_HOURS = 8
+FULL_DAY_MIN_HOURS = 7      # >= this counts as a full day
+HALF_DAY_MIN_HOURS = 4      # >= this but < full = half day
+
 scheduler = None
 mongo_scheduler = None
 
@@ -1142,6 +1154,54 @@ def _fmt_hms(total_seconds):
     total_seconds = int(total_seconds) % 86400
     return f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}"
 
+def _compute_day_status(entry_time, exit_time):
+    """Classify a day from its HH:MM:SS entry/exit strings.
+
+    Returns (day_status, hours_worked). hours_worked is a float rounded to 2dp,
+    or None when it cannot be computed. Statuses:
+      - 'full_day'     hours >= FULL_DAY_MIN_HOURS
+      - 'half_day'     hours >= HALF_DAY_MIN_HOURS but < full
+      - 'short_day'    0 <= hours < HALF_DAY_MIN_HOURS  (review state)
+      - 'missing_exit' entry present but no usable exit  (review state; do NOT guess)
+      - None           no entry at all
+    'short_day' and 'missing_exit' are REVIEW states — callers must never treat
+    them as a plain full day or as absent.
+    """
+    e = _parse_hms(entry_time)
+    if e is None:
+        return None, None
+    x = _parse_hms(exit_time)
+    if x is None or x < e:
+        # No exit, or an exit that lands before entry (corrupt) — needs a human.
+        return 'missing_exit', None
+    hours = round((x - e) / 3600.0, 2)
+    if hours >= FULL_DAY_MIN_HOURS:
+        return 'full_day', hours
+    if hours >= HALF_DAY_MIN_HOURS:
+        return 'half_day', hours
+    return 'short_day', hours
+
+
+def _report_status(entry_time, exit_time, day_status, status_override):
+    """The status a report/UI should show for a row.
+
+    Prefers an Admin status_override, then the stored day_status, and finally
+    computes one live from the times (for old rows left NULL by migration 031 —
+    this is deterministic, not a guessed backfill, and is never written to the DB).
+    """
+    if status_override:
+        return status_override
+    if day_status:
+        return day_status
+    ds, _ = _compute_day_status(entry_time, exit_time)
+    return ds
+
+
+# Statuses that mean "a human still needs to look at this day". They must never
+# be silently collapsed into present/full-day or absent in any report.
+ATTENDANCE_REVIEW_STATUSES = ('short_day', 'missing_exit')
+
+
 def compute_employee_attendance(cur, employee_id, year, month):
     """Compute per-day + summary biometric attendance for one employee/month.
 
@@ -1164,7 +1224,7 @@ def compute_employee_attendance(cur, employee_id, year, month):
 
     cur.execute(
         """
-        SELECT date, entry_time, exit_time
+        SELECT date, entry_time, exit_time, day_status, status_override
         FROM cctv_attendance
         WHERE crm_id = %s AND date >= %s AND date < %s
         ORDER BY date
@@ -1178,7 +1238,10 @@ def compute_employee_attendance(cur, employee_id, year, month):
     exit_secs = []
     total_hours = 0.0
     present_dates = set()
-    for d, et, xt in rows:
+    full_days = 0
+    half_days = 0
+    review_days = 0
+    for d, et, xt, day_status, status_override in rows:
         e = _parse_hms(et)
         x = _parse_hms(xt)
         hours = None
@@ -1191,11 +1254,19 @@ def compute_employee_attendance(cur, employee_id, year, month):
                 entry_secs.append(e)
         if x is not None:
             exit_secs.append(x)
+        status = _report_status(et, xt, day_status, status_override)
+        if status == 'full_day':
+            full_days += 1
+        elif status == 'half_day':
+            half_days += 1
+        elif status in ATTENDANCE_REVIEW_STATUSES:
+            review_days += 1
         days.append({
             "date": d.isoformat(),
             "entry_time": et,
             "exit_time": xt,
             "hours_worked": hours,
+            "status": status,
         })
 
     # Leave days already recorded this month (any type) don't count as absences.
@@ -1232,6 +1303,9 @@ def compute_employee_attendance(cur, employee_id, year, month):
             "average_entry_time": None,
             "average_exit_time": None,
             "working_days": working_days,
+            "full_days": 0,
+            "half_days": 0,
+            "days_needing_review": 0,
         }
 
     working_leave_days = len([d for d in leave_dates if d.weekday() != 6])
@@ -1246,6 +1320,9 @@ def compute_employee_attendance(cur, employee_id, year, month):
         "average_entry_time": _fmt_hms(sum(entry_secs) / len(entry_secs)) if entry_secs else None,
         "average_exit_time": _fmt_hms(sum(exit_secs) / len(exit_secs)) if exit_secs else None,
         "working_days": working_days,
+        "full_days": full_days,
+        "half_days": half_days,
+        "days_needing_review": review_days,
     }
     return True, days, summary
 
@@ -2377,21 +2454,107 @@ async def attendance_list(date: str = None, current_emp = Depends(get_current_em
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT source_person_id, person_name, person_role, crm_id,
-                   date, entry_time, exit_time, updated_at
+            SELECT id, source_person_id, person_name, person_role, crm_id,
+                   date, entry_time, exit_time, updated_at,
+                   day_status, hours_worked, status_override, override_at
             FROM cctv_attendance
             WHERE date = %s
             ORDER BY entry_time NULLS LAST
         """, (target,))
         rows = [{
-            "person_id": r[0], "name": r[1], "role": r[2], "crm_id": r[3],
-            "date": r[4].isoformat() if r[4] else None,
-            "entry_time": r[5], "exit_time": r[6],
-            "updated_at": r[7].isoformat() if r[7] else None,
+            "record_id": r[0],
+            "person_id": r[1], "name": r[2], "role": r[3], "crm_id": r[4],
+            "date": r[5].isoformat() if r[5] else None,
+            "entry_time": r[6], "exit_time": r[7],
+            "updated_at": r[8].isoformat() if r[8] else None,
+            "day_status": r[9],
+            "hours_worked": float(r[10]) if r[10] is not None else None,
+            "status_override": r[11],
+            "effective_status": _report_status(r[6], r[7], r[9], r[11]),
+            "override_at": r[12].isoformat() if r[12] else None,
         } for r in cur.fetchall()]
     return {"date": target, "rows": rows,
             "present": len(rows),
-            "inside": sum(1 for r in rows if not r["exit_time"])}
+            "inside": sum(1 for r in rows if not r["exit_time"]),
+            "needs_review": sum(1 for r in rows
+                                if r["effective_status"] in ATTENDANCE_REVIEW_STATUSES)}
+
+
+# Admin may force a day's status to one of these (overrides the computed day_status).
+ATTENDANCE_OVERRIDE_STATUSES = ('full_day', 'half_day', 'absent', 'leave')
+
+
+@app.patch("/api/attendance/{record_id}")
+async def attendance_override(record_id: int, data: dict,
+                              current_emp = Depends(get_current_employee)):
+    """Admin correction for a single attendance day (mistakes happen).
+
+    Body may contain any of:
+      - status_override: 'full_day'|'half_day'|'absent'|'leave', or null to clear
+      - entry_time / exit_time: 'HH:MM:SS' corrections (or null to clear)
+    Correcting the times recomputes day_status/hours_worked. Every change stamps
+    override_by/override_at and writes an audit_log row. Reports prefer
+    status_override over the computed day_status.
+    """
+    _require_attendance_admin(current_emp)
+
+    def _valid_time(v):
+        return v in (None, "") or _parse_hms(v) is not None
+
+    fields, values, changed = [], [], {}
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT entry_time, exit_time FROM cctv_attendance WHERE id = %s",
+            (record_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Attendance record not found")
+        new_entry, new_exit = row[0], row[1]
+
+        if "entry_time" in data:
+            if not _valid_time(data["entry_time"]):
+                raise HTTPException(status_code=422, detail="entry_time must be HH:MM:SS")
+            new_entry = data["entry_time"] or None
+            fields.append("entry_time = %s"); values.append(new_entry)
+            changed["entry_time"] = new_entry
+        if "exit_time" in data:
+            if not _valid_time(data["exit_time"]):
+                raise HTTPException(status_code=422, detail="exit_time must be HH:MM:SS")
+            new_exit = data["exit_time"] or None
+            fields.append("exit_time = %s"); values.append(new_exit)
+            changed["exit_time"] = new_exit
+
+        # A time correction re-derives the computed status/hours.
+        if "entry_time" in data or "exit_time" in data:
+            day_status, hours_worked = _compute_day_status(new_entry, new_exit)
+            fields.append("day_status = %s"); values.append(day_status)
+            fields.append("hours_worked = %s"); values.append(hours_worked)
+
+        if "status_override" in data:
+            ov = data["status_override"] or None
+            if ov is not None and ov not in ATTENDANCE_OVERRIDE_STATUSES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"status_override must be one of {ATTENDANCE_OVERRIDE_STATUSES} or null")
+            fields.append("status_override = %s"); values.append(ov)
+            changed["status_override"] = ov
+
+        if not fields:
+            raise HTTPException(status_code=400, detail="Nothing to update")
+
+        fields.append("override_by = %s"); values.append(current_emp["id"])
+        fields.append("override_at = NOW()")
+        fields.append("updated_at = NOW()")
+        values.append(record_id)
+        cur.execute(
+            f"UPDATE cctv_attendance SET {', '.join(fields)} WHERE id = %s", values)
+
+        _audit(cur, current_emp["id"], "attendance_override", "cctv_attendance",
+               {"record_id": record_id, **changed})
+
+    return {"status": "updated", "record_id": record_id, "changes": changed}
 
 
 # ---------------------------------------------------------------------------
@@ -2547,6 +2710,30 @@ async def attendance_hikvision(request: Request, token: str = ""):
                 return {"status": "ignored-duplicate", "person_id": source_id,
                         "date": date_str, "time": time_str}
 
+            # --- debounce accidental re-taps ---
+            # Load the day's existing entry/exit once. A punch landing within
+            # ATTENDANCE_MIN_PUNCH_GAP_MINUTES of an already-recorded entry OR exit
+            # is a double-tap: ignore it entirely so it can neither flip a fresh
+            # entry into an exit nor keep overwriting the exit. Never mutate the row.
+            cur.execute("""
+                SELECT entry_time, exit_time FROM cctv_attendance
+                WHERE source_person_id = %s AND date = %s
+            """, (source_id, date_str))
+            existing_row = cur.fetchone()
+            punch_secs = _parse_hms(time_str)
+            if existing_row and punch_secs is not None:
+                gap_secs = ATTENDANCE_MIN_PUNCH_GAP_MINUTES * 60
+                prev_entry = _parse_hms(existing_row[0])
+                prev_exit = _parse_hms(existing_row[1])
+                if ((prev_entry is not None and abs(punch_secs - prev_entry) < gap_secs) or
+                        (prev_exit is not None and abs(punch_secs - prev_exit) < gap_secs)):
+                    logging.info("Hikvision: re-tap ignored emp=%s date=%s time=%s "
+                                 "(within %d min of a recorded punch)",
+                                 emp_no, date_str, time_str,
+                                 ATTENDANCE_MIN_PUNCH_GAP_MINUTES)
+                    return {"status": "ignored-retap", "person_id": source_id,
+                            "date": date_str, "time": time_str}
+
             # --- resolve identity from the device->CRM mapping ---
             # If Admin has mapped this raw device id, use the CRM person's name,
             # role and id. If not, keep the device-supplied name and mark the row
@@ -2573,10 +2760,7 @@ async def attendance_hikvision(request: Request, token: str = ""):
             else:
                 # undefined/missing: first punch of the day = entry; any later
                 # punch updates exit_time (last punch of the day becomes exit).
-                cur.execute("SELECT 1 FROM cctv_attendance "
-                            "WHERE source_person_id = %s AND date = %s",
-                            (source_id, date_str))
-                is_entry = cur.fetchone() is None
+                is_entry = existing_row is None
 
             if is_entry:
                 cur.execute("""
@@ -2607,6 +2791,21 @@ async def attendance_hikvision(request: Request, token: str = ""):
                         updated_at  = NOW()
                 """, (source_id, person_name, person_role, crm_id,
                       date_str, time_str))
+
+            # --- recompute day_status + hours from the row as it now stands ---
+            # (entry only -> 'missing_exit'; entry+exit -> full/half/short_day).
+            # status_override, if an Admin set one, is left untouched.
+            cur.execute("""
+                SELECT entry_time, exit_time FROM cctv_attendance
+                WHERE source_person_id = %s AND date = %s
+            """, (source_id, date_str))
+            final_row = cur.fetchone()
+            if final_row:
+                day_status, hours_worked = _compute_day_status(final_row[0], final_row[1])
+                cur.execute("""
+                    UPDATE cctv_attendance SET day_status = %s, hours_worked = %s
+                    WHERE source_person_id = %s AND date = %s
+                """, (day_status, hours_worked, source_id, date_str))
 
         logging.info("Hikvision attendance: emp=%s name=%r date=%s time=%s -> %s",
                      emp_no, name, date_str, time_str,
@@ -2765,7 +2964,7 @@ async def attendance_monthly(month: str = None, current_emp = Depends(get_curren
         cur = conn.cursor()
         cur.execute("""
             SELECT source_person_id, person_name, person_role, crm_id,
-                   date, entry_time, exit_time
+                   date, entry_time, exit_time, day_status, hours_worked, status_override
             FROM cctv_attendance
             WHERE date >= %s AND date < %s
             ORDER BY person_name, date
@@ -2782,11 +2981,23 @@ async def attendance_monthly(month: str = None, current_emp = Depends(get_curren
                 "device_person_id": _strip_hik(pid),
                 "name": r[1], "role": r[2], "crm_id": r[3],
                 "days_present": 0, "first_seen": None, "last_seen": None,
+                "full_days": 0, "half_days": 0, "days_needing_review": 0,
                 "days": [],
             }
         d = r[4].isoformat()
-        p["days"].append({"date": d, "entry_time": r[5], "exit_time": r[6]})
+        status = _report_status(r[5], r[6], r[7], r[9])
+        p["days"].append({
+            "date": d, "entry_time": r[5], "exit_time": r[6],
+            "status": status,
+            "hours_worked": float(r[8]) if r[8] is not None else None,
+        })
         p["days_present"] += 1
+        if status == 'full_day':
+            p["full_days"] += 1
+        elif status == 'half_day':
+            p["half_days"] += 1
+        elif status in ATTENDANCE_REVIEW_STATUSES:
+            p["days_needing_review"] += 1
         if p["first_seen"] is None or d < p["first_seen"]:
             p["first_seen"] = d
         if p["last_seen"] is None or d > p["last_seen"]:
