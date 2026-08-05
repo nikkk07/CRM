@@ -27,17 +27,30 @@ DATABASE_URL_WITH_PARAMS = make_conninfo(**conn_params)
 # the dominant latency. A warm pool of reusable connections removes it entirely;
 # the only per-request cost is now a cheap liveness check on an already-open
 # connection.
-POOL_MIN = int(os.getenv("DB_POOL_MIN", "2"))
-POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
+#
+# CRITICAL for Supabase's transaction-mode pooler (pgbouncer, port 6543):
+# psycopg3 auto-prepares statements and caches them on the *server* connection.
+# In transaction mode pgbouncer multiplexes many clients over a small set of
+# server connections, so a "PREPARE _pg3_1" issued on one physical backend is
+# later re-issued on another that already has that name -> DuplicatePreparedStatement.
+# Passing prepare_threshold=None to EVERY connection disables client-side
+# auto-preparation entirely, which is mandatory for pgbouncer transaction mode.
+CONN_KWARGS = {"prepare_threshold": None}
+
+# Render free tier is 512MB / 0.1 CPU — keep the pool tiny. Supabase's pooler
+# also shares a limited server-connection budget across all clients.
+POOL_MIN = 1
+POOL_MAX = 5
 
 pool = ConnectionPool(
     conninfo=DATABASE_URL_WITH_PARAMS,
     min_size=POOL_MIN,
     max_size=POOL_MAX,
+    kwargs=CONN_KWARGS,                       # prepare_threshold=None on every connection
     max_idle=300,                            # recycle idle connections after 5 min
     max_lifetime=1800,                       # hard-recycle any connection after 30 min
     timeout=10,                              # wait up to 10s for a free connection
-    check=ConnectionPool.check_connection,   # cheap liveness check on checkout (auto-reconnect if dead)
+    check=ConnectionPool.check_connection,   # cheap liveness pre-ping on checkout (auto-reconnect if dead)
     name="crm_pool",
     open=False,
 )

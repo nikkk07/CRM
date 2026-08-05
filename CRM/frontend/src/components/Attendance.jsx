@@ -498,6 +498,20 @@ function DevicePeople() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // The employee list is the same for every row's picker, so fetch it ONCE here
+  // and pass it down. Previously each DevicePersonRow fetched /api/employees on
+  // mount (and again on every keystroke), producing a burst of ~20 identical
+  // GET /api/employees (and their CORS OPTIONS preflights) per page load.
+  const [employees, setEmployees] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_URL}/api/employees`, { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => { if (alive) setEmployees(Array.isArray(list) ? list : []); })
+      .catch(() => { if (alive) setEmployees([]); });
+    return () => { alive = false; };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -538,7 +552,7 @@ function DevicePeople() {
 
       <div className="space-y-3">
         {people.map((p) => (
-          <DevicePersonRow key={p.source_person_id} person={p} onChanged={load} />
+          <DevicePersonRow key={p.source_person_id} person={p} employees={employees} onChanged={load} />
         ))}
         {!loading && people.length === 0 && !error && (
           <div className="glass-card p-10 text-center text-slate-400 text-sm">
@@ -553,7 +567,7 @@ function DevicePeople() {
   );
 }
 
-function DevicePersonRow({ person, onChanged }) {
+function DevicePersonRow({ person, employees = [], onChanged }) {
   const [personType, setPersonType] = useState(person.mapping?.person_type || 'employee');
   const [query, setQuery] = useState('');
   const [candidates, setCandidates] = useState([]);
@@ -563,14 +577,13 @@ function DevicePersonRow({ person, onChanged }) {
   const [rowError, setRowError] = useState('');
   const [editing, setEditing] = useState(!person.is_mapped);
 
-  // Load CRM people of the chosen type when the picker is open.
+  // Employees come from the parent (fetched once for the whole list) and are
+  // filtered client-side, so only STUDENTS need a per-row, server-side search
+  // fetch when the picker is open.
   useEffect(() => {
-    if (!editing) return;
+    if (!editing || personType !== 'student') return;
     let alive = true;
-    const url = personType === 'employee'
-      ? `${API_URL}/api/employees`
-      : `${API_URL}/api/students?search=${encodeURIComponent(query)}`;
-    fetch(url, { headers: authHeaders() })
+    fetch(`${API_URL}/api/students?search=${encodeURIComponent(query)}`, { headers: authHeaders() })
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => { if (alive) setCandidates(Array.isArray(list) ? list : []); })
       .catch(() => { if (alive) setCandidates([]); });
@@ -578,7 +591,7 @@ function DevicePersonRow({ person, onChanged }) {
   }, [personType, query, editing]);
 
   const filtered = personType === 'employee'
-    ? candidates.filter((c) => (c.name || '').toLowerCase().includes(query.toLowerCase()))
+    ? employees.filter((c) => (c.name || '').toLowerCase().includes(query.toLowerCase()))
     : candidates; // students already filtered server-side
 
   const pick = (c) => {
