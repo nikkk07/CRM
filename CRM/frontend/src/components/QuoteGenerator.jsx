@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
 
 export default function QuoteGenerator({ lead, onClose }) {
@@ -83,9 +84,9 @@ export default function QuoteGenerator({ lead, onClose }) {
     }
   };
 
-  return (
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 animate-glass-in">
-      <div className="glass-strong max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+  return createPortal(
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto animate-glass-in">
+      <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-4">
           <div>
             <h2 className="text-xl font-bold">Generate Quote</h2>
@@ -268,6 +269,7 @@ export default function QuoteGenerator({ lead, onClose }) {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

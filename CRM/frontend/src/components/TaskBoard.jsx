@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { formatDate } from '../utils/formatters';
 import { showToast } from '../utils/toast';
 import LoadingSpinner from './LoadingSpinner';
@@ -127,9 +128,9 @@ export default function TaskBoard() {
       </div>
       {employees.length === 0 && <div className="text-center py-16 text-glass-muted"><div className="text-5xl mb-4">👥</div><h3 className="text-lg font-medium text-glass-secondary mb-2">No employees found</h3><p className="text-sm">Add employees to start assigning tasks</p></div>}
 
-      {showAddTask && (
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
-          <div className="glass-strong max-w-md w-full p-6 animate-glass-in">
+      {showAddTask && createPortal(
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <h2 className="text-xl font-bold mb-4 text-glass-primary">Add New Task</h2>
             <form onSubmit={handleAddTask} className="space-y-4">
               {canViewAllEmployees && <div><label className="block text-sm font-medium text-glass-secondary mb-1">Assign To *</label><select value={formData.assigned_to || ''} onChange={(e) => setFormData({...formData, assigned_to: e.target.value})} className="glass-input w-full px-3 py-2" required><option value="">Select employee...</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}</select></div>}
@@ -139,7 +140,8 @@ export default function TaskBoard() {
               <div className="flex gap-3 pt-4"><button type="submit" disabled={submitting} className="glass-btn flex-1 px-4 py-2">{submitting ? 'Adding...' : 'Add Task'}</button><button type="button" disabled={submitting} onClick={() => { setShowAddTask(false); setFormData({}); }} className="px-4 py-2 rounded-lg font-medium" style={{ background: '#f3f4f6', color: '#424245' }}>Cancel</button></div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

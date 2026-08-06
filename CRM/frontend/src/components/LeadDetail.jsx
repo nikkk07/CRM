@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import QuoteGenerator from './QuoteGenerator';
 
 export default function LeadDetail({ lead, onClose, onContact }) {
@@ -27,8 +28,9 @@ export default function LeadDetail({ lead, onClose, onContact }) {
 
   return (
     <>
-      <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
-        <div className="glass-strong max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 animate-glass-in">
+      {createPortal(
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="glass-strong max-w-2xl w-full my-8 max-h-[90vh] overflow-y-auto p-6 animate-glass-in">
           <div className="flex justify-between items-start mb-4">
             <div>
               <h2 className="text-2xl font-bold text-glass-primary">{lead.name}</h2>
@@ -94,7 +96,9 @@ export default function LeadDetail({ lead, onClose, onContact }) {
           </div>
           <button onClick={handleSave} disabled={!disposition} className="glass-btn w-full py-3">Save Contact Attempt</button>
         </div>
-      </div>
+        </div>,
+        document.body
+      )}
       {showQuoteGen && <QuoteGenerator lead={lead} onClose={() => setShowQuoteGen(false)} />}
     </>
   );

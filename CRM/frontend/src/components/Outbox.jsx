@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
 
 export default function Outbox({ onClose }) {
@@ -9,9 +10,9 @@ export default function Outbox({ onClose }) {
   const handleMarkSent = async (msgId) => { if (!confirm('Mark this quote as sent?')) return; const token = localStorage.getItem('token'); await fetch(`${API_URL}/api/outbox/${msgId}/sent`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); loadMessages(); };
   const getWhatsAppLink = (msg) => { const pdfUrl = `${API_URL}/api/quotes/${msg.id}/pdf`; const text = `Hi ${msg.lead_name},\n\nPlease find your course quote here: ${pdfUrl}\n\nFor any queries, contact us.\n\n- We One Aviation`; const phone = msg.lead_phone.replace(/\D/g, ''); const phoneWith91 = phone.startsWith('91') ? phone : `91${phone}`; return `https://wa.me/${phoneWith91}?text=${encodeURIComponent(text)}`; };
 
-  return (
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
-      <div className="glass-strong max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6 animate-glass-in">
+  return createPortal(
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+      <div className="glass-strong max-w-4xl w-full my-8 max-h-[90vh] overflow-y-auto p-6 animate-glass-in">
         <div className="flex justify-between items-start mb-4"><div><h2 className="text-2xl font-bold text-glass-primary">Outbox</h2><p className="text-sm text-glass-secondary">Review quotes before sending via WhatsApp</p></div><button onClick={onClose} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
         <div className="space-y-3">
           {messages.map(msg => (
@@ -30,6 +31,7 @@ export default function Outbox({ onClose }) {
           {messages.length === 0 && <div className="text-center text-glass-muted py-12">No messages in outbox</div>}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

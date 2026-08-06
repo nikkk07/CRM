@@ -1,4 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import Login from './components/Login';
 import EmployeeLogin from './components/EmployeeLogin';
 import StudentLogin from './components/StudentLogin';
@@ -234,9 +235,9 @@ export default function App() {
         {showAddQuery && <AddQuery requiredQualification={config.eligibility_required_qualification || '12th with Physics & Maths'} onClose={() => setShowAddQuery(false)} onCreated={() => { setShowAddQuery(false); syncNow(); }} onOpenExisting={(leadId) => { setShowAddQuery(false); const existing = leads.find(l => l.id === leadId); if (existing) setSelectedLead(existing); }} />}
       </Suspense>
 
-      {showChangePassword && (
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
-          <div className="glass-strong max-w-md w-full p-6 animate-glass-in">
+      {showChangePassword && createPortal(
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <h2 className="text-xl font-bold mb-4 text-glass-primary">Change Password</h2>
             {passwordError && <div className="mb-4 p-3 rounded-lg text-sm" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>{passwordError}</div>}
             <form onSubmit={handleChangePassword} className="space-y-4">
@@ -249,7 +250,8 @@ export default function App() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

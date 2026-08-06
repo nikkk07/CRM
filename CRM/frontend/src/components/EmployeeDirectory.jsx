@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { formatDate, formatPhone } from '../utils/formatters';
 import LoadingSpinner from './LoadingSpinner';
 import EmptyState from './EmptyState';
@@ -54,7 +55,7 @@ export default function EmployeeDirectory() {
         </div>
       )}
 
-      {selectedEmployee && (
+      {selectedEmployee && createPortal(
         <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="glass-strong max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <div className="flex justify-between items-start mb-6"><div className="flex items-center gap-4"><div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: '#6366f1', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}>{selectedEmployee.name.charAt(0).toUpperCase()}</div><div><h2 className="text-2xl font-bold text-glass-primary">{selectedEmployee.name}</h2><p className="text-glass-secondary">{selectedEmployee.job_role || 'Employee'}</p></div></div><button onClick={() => setSelectedEmployee(null)} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
@@ -80,12 +81,13 @@ export default function EmployeeDirectory() {
             </div>
             <div className="mt-6 flex gap-3"><button onClick={() => { setFormData(selectedEmployee); setSelectedEmployee(null); setShowForm(true); }} className="glass-btn px-4 py-2">Edit Employee</button><button onClick={() => setSelectedEmployee(null)} className="px-4 py-2 rounded-lg font-medium" style={{ background: '#f3f4f6', color: '#424245' }}>Close</button></div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showForm && (
+      {showForm && createPortal(
         <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="glass-strong max-w-2xl w-full p-6 my-8 animate-glass-in">
+          <div className="glass-strong max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <h2 className="text-xl font-bold mb-4 text-glass-primary">{formData.id ? 'Edit' : 'Add'} Employee</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -107,7 +109,8 @@ export default function EmployeeDirectory() {
               <div className="flex gap-3 pt-4"><button type="submit" className="glass-btn px-6 py-2">{formData.id ? 'Update' : 'Create'} Employee</button><button type="button" onClick={() => { setShowForm(false); setFormData({}); setLoginIdManual(false); }} className="px-6 py-2 rounded-lg font-medium" style={{ background: '#f3f4f6', color: '#424245' }}>Cancel</button></div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

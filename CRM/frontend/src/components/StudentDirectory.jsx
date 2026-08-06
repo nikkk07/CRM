@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
 import { showToast } from '../utils/toast';
 import { COURSES } from '../constants/courses';
@@ -174,9 +175,9 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
 
   const input = 'w-full glass-input';
 
-  return (
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
-      <div className="glass-strong max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+  return createPortal(
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+      <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-4">
           <h2 className="text-xl font-bold">Add Student</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">×</button>
@@ -220,7 +221,8 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
           </button>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -375,9 +377,9 @@ function StudentDetail({ studentId, onBack }) {
         />
       )}
 
-      {showDelete && (
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
-          <div className="glass-strong max-w-md w-full p-6">
+      {showDelete && createPortal(
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-bold text-red-700 mb-2">Delete Student</h3>
             <p className="text-sm text-gray-700 mb-4">
               This permanently deletes <span className="font-semibold">{[student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ')}</span>,
@@ -403,7 +405,8 @@ function StudentDetail({ studentId, onBack }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -438,9 +441,9 @@ function SetPinModal({ studentId, studentName, onClose }) {
     } catch { setSaving(false); showToast('Failed to update', 'error'); }
   };
 
-  return (
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
-      <div className="glass-strong max-w-md w-full p-6">
+  return createPortal(
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+      <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-bold text-glass-primary mb-1">Set Student Login PIN</h3>
         <p className="text-sm text-glass-muted mb-4">{studentName}</p>
         <form onSubmit={save} className="space-y-4">
@@ -473,6 +476,7 @@ function SetPinModal({ studentId, studentName, onClose }) {
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

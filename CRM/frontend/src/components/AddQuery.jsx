@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
 import { showToast } from '../utils/toast';
 import { COURSES } from '../constants/courses';
@@ -32,9 +33,9 @@ export default function AddQuery({ requiredQualification, onClose, onCreated, on
 
   const input = "glass-input w-full px-3 py-2";
 
-  return (
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50">
-      <div className="glass-strong max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto animate-glass-in">
+  return createPortal(
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+      <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
         <div className="flex justify-between items-start mb-4"><h2 className="text-xl font-bold text-glass-primary">Add Query</h2><button onClick={onClose} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div><label className="block text-sm font-semibold mb-1 text-glass-primary">Lead From *</label><select value={form.utm_source} onChange={(e) => set('utm_source', e.target.value)} className={input} required><option value="">-- Select Source --</option>{SOURCES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
@@ -49,6 +50,7 @@ export default function AddQuery({ requiredQualification, onClose, onCreated, on
           <button type="submit" disabled={saving} className="glass-btn w-full py-3" style={{ background: '#22c55e' }}>{saving ? 'Saving...' : 'Save Query'}</button>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
