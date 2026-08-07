@@ -52,6 +52,25 @@ SHIFT_HOURS = 8
 FULL_DAY_MIN_HOURS = 7      # >= this counts as a full day
 HALF_DAY_MIN_HOURS = 4      # >= this but < full = half day
 
+
+def blank_to_none(data: dict, *fields: str) -> None:
+    """HTML forms POST "" for optional inputs the user never touched, and Postgres
+    rejects "" for DATE/NUMERIC columns ("invalid input syntax for type date").
+    Rewrite blanks to None in place so they land as NULL."""
+    for f in fields:
+        v = data.get(f)
+        if isinstance(v, str) and not v.strip():
+            data[f] = None
+
+
+def require_fields(data: dict, *fields: str) -> None:
+    """400 naming the offending field, instead of letting psycopg raise a 500."""
+    for f in fields:
+        v = data.get(f)
+        if v is None or (isinstance(v, str) and not v.strip()):
+            raise HTTPException(status_code=400, detail=f"{f} is required")
+
+
 scheduler = None
 mongo_scheduler = None
 
@@ -1375,9 +1394,17 @@ async def get_employee_attendance(employee_id: str, year: int, month: int, curre
 
 @app.post("/api/employees")
 async def create_employee(data: dict, current_emp = Depends(get_current_employee)):
+    # name/phone are NOT NULL (migration 001) — name them in a 400 rather than
+    # letting the insert raise a 500.
+    require_fields(data, 'name', 'phone')
+    # joining_date/date_of_leaving are DATE and paid_leave_quota/monthly_salary are
+    # numeric: "" from the form has to become NULL, not reach Postgres as a string.
+    blank_to_none(data, 'employee_id', 'email', 'job_role', 'address', 'pay_scale',
+                  'joining_date', 'date_of_leaving', 'login_pin',
+                  'paid_leave_quota', 'monthly_salary')
     with get_db() as conn:
         cur = conn.cursor()
-        
+
         # Encrypt pay_scale if provided
         pay_scale_encrypted = None
         if data.get('pay_scale'):
@@ -1415,7 +1442,7 @@ async def create_employee(data: dict, current_emp = Depends(get_current_employee
                     data.get('name'), data.get('phone'),
                     data.get('email'), data.get('job_role'), data.get('address'),
                     pay_scale_encrypted, data.get('joining_date'),
-                    data.get('status', 'active'), data.get('date_of_leaving'),
+                    data.get('status') or 'active', data.get('date_of_leaving'),
                     department,
                     hash_password(data.get('password', 'welcome123')),
                     json.dumps(data.get('permissions', {}))
@@ -2083,11 +2110,13 @@ async def get_student(student_id: str, current_emp = Depends(get_current_employe
 @app.post("/api/students")
 async def create_student(data: dict, current_emp = Depends(get_current_employee)):
     _require_students_access(current_emp)
-    first = (data.get('first_name') or '').strip()
-    last = (data.get('last_name') or '').strip()
-    raw_mobile = (data.get('mobile') or '').strip()
-    if not first or not last or not raw_mobile:
-        raise HTTPException(status_code=400, detail="first_name, last_name and mobile are required")
+    require_fields(data, 'first_name', 'last_name', 'mobile')
+    # Every column below this line is nullable: "" from the form must become NULL.
+    blank_to_none(data, 'middle_name', 'guardian_name', 'emergency_contact', 'address',
+                  'course', 'admission_date', 'computer_number', 'lead_id')
+    first = data['first_name'].strip()
+    last = data['last_name'].strip()
+    raw_mobile = data['mobile'].strip()
     mobile_norm = normalize_phone(raw_mobile)
     emergency = normalize_phone(data['emergency_contact']) if data.get('emergency_contact') else None
     with get_db() as conn:
@@ -2117,6 +2146,11 @@ async def update_student(student_id: str, data: dict, current_emp = Depends(get_
     _require_students_access(current_emp)
     allowed = {'first_name', 'middle_name', 'last_name', 'guardian_name', 'address',
                'course', 'admission_date', 'computer_number', 'emergency_contact'}
+    # first_name/last_name are NOT NULL; blanking them is a 400, not a 500.
+    require_fields(data, *(k for k in ('first_name', 'last_name') if k in data))
+    # The rest are nullable: clearing an input sends "" and must store NULL.
+    blank_to_none(data, 'middle_name', 'guardian_name', 'address', 'course',
+                  'admission_date', 'computer_number', 'emergency_contact')
     fields, values = [], []
     for k in allowed:
         if k in data:

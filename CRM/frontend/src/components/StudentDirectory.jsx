@@ -4,6 +4,18 @@ import { API_URL } from '../api';
 import { showToast } from '../utils/toast';
 import { COURSES } from '../constants/courses';
 
+// FastAPI sends `detail` as a string for HTTPException but as a list of
+// {loc, msg} objects for 422s — flatten both so the toast never shows [object Object].
+function errorDetail(data) {
+  const d = data?.detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) {
+    return d.map((e) => (typeof e === 'string' ? e : [e?.loc?.slice(-1)[0], e?.msg].filter(Boolean).join(': ')))
+      .filter(Boolean).join('; ');
+  }
+  return d ? JSON.stringify(d) : '';
+}
+
 const DOC_LABELS = {
   photo_id_proof: 'Photo ID Proof',
   passport_photo: 'Passport Photo',
@@ -154,14 +166,18 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
     }
     setSaving(true);
     try {
+      // Optional fields go as null, never "" — Postgres rejects "" for date/numeric columns.
+      const payload = Object.fromEntries(
+        Object.entries(form).map(([k, v]) => [k, typeof v === 'string' && !v.trim() ? null : v])
+      );
       const res = await fetch(`${API_URL}/api/students`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, lead_id: form.lead_id || null }),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setSaving(false);
-      if (!res.ok) { showToast(data.detail || 'Failed to add student', 'error'); return; }
+      if (!res.ok) { showToast(errorDetail(data) || `Failed to add student (${res.status})`, 'error'); return; }
       if (data.status === 'duplicate') {
         if (window.confirm(`A student with this mobile already exists${data.name ? ` (${data.name})` : ''}. Open the existing record?`)) {
           onOpenExisting(data.student_id);
@@ -170,7 +186,7 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
       }
       showToast('Student added', 'success');
       onCreated();
-    } catch { setSaving(false); showToast('Failed to add student', 'error'); }
+    } catch (err) { setSaving(false); showToast(`Failed to add student: ${err?.message || 'network error'}`, 'error'); }
   };
 
   const input = 'w-full glass-input';
