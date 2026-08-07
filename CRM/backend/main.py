@@ -3092,6 +3092,104 @@ async def attendance_summary(months: int = 12, current_emp = Depends(get_current
     return {"months": months, "rows": rows}
 
 
+# ---------------------------------------------------------------------------
+# Partner read-only API (server-to-server, first-party apps such as DGCA_prep).
+#
+# Secured by its own shared secret PARTNER_API_TOKEN — deliberately NOT the
+# device's ATTENDANCE_INGEST_TOKEN, so leaking one never grants the other.
+# Never called from a browser, so CORS is intentionally left untouched.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/partner/attendance/by-mobile")
+async def partner_attendance_by_mobile(mobile: str, month: str = None,
+                                       authorization: str = Header(default="")):
+    """One student's biometric attendance, looked up by mobile number.
+
+    Caller must send 'Authorization: Bearer <PARTNER_API_TOKEN>'. Returns ONLY
+    that student's own name/course plus their attendance rows — knowing one
+    mobile must never expose any other student.
+    """
+    token = os.getenv("PARTNER_API_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=503,
+                            detail="PARTNER_API_TOKEN not configured on the CRM server")
+    if not secrets.compare_digest(authorization, f"Bearer {token}"):
+        raise HTTPException(status_code=401, detail="Invalid partner token")
+
+    # Accept any format ('+91 98765-43210', '098765 43210', ...): keep the last
+    # 10 digits and run them through the same normalizer used on write.
+    digits = re.sub(r'\D', '', mobile or "")
+    if len(digits) < 10:
+        raise HTTPException(status_code=422, detail="mobile must contain at least 10 digits")
+    mobile_norm = normalize_phone(digits[-10:])
+
+    target = month or datetime.now(_IST).strftime("%Y-%m")
+    try:
+        start = datetime.strptime(target + "-01", "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    nm = start.month % 12 + 1
+    ny = start.year + (1 if start.month == 12 else 0)
+    end = date(ny, nm, 1)
+
+    def _row(r):
+        return {
+            "date": r[0].isoformat(),
+            "entry_time": r[1],
+            "exit_time": r[2],
+            "status": _report_status(r[1], r[2], r[3], r[4]),
+            "hours_worked": float(r[5]) if r[5] is not None else None,
+        }
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, first_name, last_name, course FROM student WHERE mobile_normalized = %s",
+            (mobile_norm,))
+        student = cur.fetchone()
+        if not student:
+            return {"linked": False, "device_mapped": False, "month": target,
+                    "student": None, "days": [], "recent": []}
+        student_id, first_name, last_name, course = student
+
+        # Is a biometric device id actually bound to this student? Without this
+        # the caller cannot tell "absent" from "Admin never mapped their face".
+        cur.execute(
+            "SELECT 1 FROM device_person_map WHERE crm_person_id = %s LIMIT 1",
+            (student_id,))
+        device_mapped = cur.fetchone() is not None
+
+        cur.execute("""
+            SELECT date, entry_time, exit_time, day_status, status_override, hours_worked
+            FROM cctv_attendance
+            WHERE crm_id = %s AND date >= %s AND date < %s
+            ORDER BY date
+        """, (str(student_id), start, end))
+        days = [_row(r) for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT date, entry_time, exit_time, day_status, status_override, hours_worked
+            FROM cctv_attendance
+            WHERE crm_id = %s
+            ORDER BY date DESC
+            LIMIT 15
+        """, (str(student_id),))
+        recent = [_row(r) for r in cur.fetchall()]
+
+    return {
+        "linked": True,
+        "device_mapped": device_mapped,
+        "month": target,
+        "student": {
+            "id": str(student_id),
+            "name": " ".join(x for x in [first_name, last_name] if x),
+            "course": course,
+        },
+        "days": days,
+        "recent": recent,
+    }
+
+
 def _attendance_retention_cutoff(today: date = None) -> date:
     """First day of (current month - ATTENDANCE_RETENTION_MONTHS). Rows strictly
     older than this cutoff are summarized then purged."""
