@@ -160,8 +160,8 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.first_name || !form.last_name || !form.mobile) {
-      showToast('First name, last name and mobile are required', 'error');
+    if (!form.first_name || !form.mobile) {
+      showToast('First name and mobile are required', 'error');
       return;
     }
     setSaving(true);
@@ -213,7 +213,7 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <input className={input} placeholder="First Name *" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} required />
             <input className={input} placeholder="Middle Name" value={form.middle_name} onChange={(e) => set('middle_name', e.target.value)} />
-            <input className={input} placeholder="Last Name *" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} required />
+            <input className={input} placeholder="Last Name" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} />
           </div>
           <input className={input} placeholder="Guardian's Name" value={form.guardian_name} onChange={(e) => set('guardian_name', e.target.value)} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

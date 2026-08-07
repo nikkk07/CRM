@@ -2110,12 +2110,13 @@ async def get_student(student_id: str, current_emp = Depends(get_current_employe
 @app.post("/api/students")
 async def create_student(data: dict, current_emp = Depends(get_current_employee)):
     _require_students_access(current_emp)
-    require_fields(data, 'first_name', 'last_name', 'mobile')
+    require_fields(data, 'first_name', 'mobile')
     # Every column below this line is nullable: "" from the form must become NULL.
-    blank_to_none(data, 'middle_name', 'guardian_name', 'emergency_contact', 'address',
-                  'course', 'admission_date', 'computer_number', 'lead_id')
+    # last_name included — single-name students are common (migration 032).
+    blank_to_none(data, 'middle_name', 'last_name', 'guardian_name', 'emergency_contact',
+                  'address', 'course', 'admission_date', 'computer_number', 'lead_id')
     first = data['first_name'].strip()
-    last = data['last_name'].strip()
+    last = (data.get('last_name') or '').strip() or None
     raw_mobile = data['mobile'].strip()
     mobile_norm = normalize_phone(raw_mobile)
     emergency = normalize_phone(data['emergency_contact']) if data.get('emergency_contact') else None
@@ -2124,8 +2125,10 @@ async def create_student(data: dict, current_emp = Depends(get_current_employee)
         cur.execute("SELECT id, first_name, last_name FROM student WHERE mobile_normalized = %s", (mobile_norm,))
         dup = cur.fetchone()
         if dup:
+            # last_name may be NULL — join only the parts that exist so the
+            # message never reads "Aarav None" or carries a trailing space.
             return {"status": "duplicate", "student_id": str(dup[0]),
-                    "name": f"{dup[1]} {dup[2]}".strip()}
+                    "name": " ".join(x for x in [dup[1], dup[2]] if x)}
         cur.execute("""
             INSERT INTO student (first_name, middle_name, last_name, guardian_name, mobile,
                                  mobile_normalized, emergency_contact, address, course,
@@ -2146,10 +2149,10 @@ async def update_student(student_id: str, data: dict, current_emp = Depends(get_
     _require_students_access(current_emp)
     allowed = {'first_name', 'middle_name', 'last_name', 'guardian_name', 'address',
                'course', 'admission_date', 'computer_number', 'emergency_contact'}
-    # first_name/last_name are NOT NULL; blanking them is a 400, not a 500.
-    require_fields(data, *(k for k in ('first_name', 'last_name') if k in data))
+    # first_name is NOT NULL; blanking it is a 400, not a 500.
+    require_fields(data, *(k for k in ('first_name',) if k in data))
     # The rest are nullable: clearing an input sends "" and must store NULL.
-    blank_to_none(data, 'middle_name', 'guardian_name', 'address', 'course',
+    blank_to_none(data, 'middle_name', 'last_name', 'guardian_name', 'address', 'course',
                   'admission_date', 'computer_number', 'emergency_contact')
     fields, values = [], []
     for k in allowed:
