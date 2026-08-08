@@ -3113,7 +3113,12 @@ async def partner_attendance_by_mobile(mobile: str, month: str = None,
     if not token:
         raise HTTPException(status_code=503,
                             detail="PARTNER_API_TOKEN not configured on the CRM server")
-    if not secrets.compare_digest(authorization, f"Bearer {token}"):
+    try:
+        ok = secrets.compare_digest(authorization, f"Bearer {token}")
+    except TypeError:
+        # compare_digest rejects non-ASCII str: a malformed header is a 401, not a 500.
+        ok = False
+    if not ok:
         raise HTTPException(status_code=401, detail="Invalid partner token")
 
     # Accept any format ('+91 98765-43210', '098765 43210', ...): keep the last
