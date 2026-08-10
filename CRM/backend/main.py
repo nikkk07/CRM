@@ -1240,6 +1240,11 @@ def _report_status(entry_time, exit_time, day_status, status_override):
 # be silently collapsed into present/full-day or absent in any report.
 ATTENDANCE_REVIEW_STATUSES = ('short_day', 'missing_exit')
 
+# Day types markable on the calendar (employee_leave_day.leave_type, migration 033).
+# 'wfh' is NOT leave: it means the person worked from home, so it neither deducts
+# salary nor consumes paid leave quota — it only stops the day counting as absent.
+MARKABLE_DAY_TYPES = ('leave', 'half_day', 'paid_leave', 'wfh')
+
 
 def compute_employee_attendance(cur, employee_id, year, month):
     """Compute per-day + summary biometric attendance for one employee/month.
@@ -1309,14 +1314,19 @@ def compute_employee_attendance(cur, employee_id, year, month):
         })
 
     # Leave days already recorded this month (any type) don't count as absences.
+    # 'wfh' lives in the same table but means the person WORKED — it is excluded
+    # from absences like the others and reported separately as wfh_days. It is
+    # never a biometric "day present" (no punch) and never counts as leave.
     cur.execute(
         """
-        SELECT leave_date FROM employee_leave_day
+        SELECT leave_date, leave_type FROM employee_leave_day
         WHERE employee_id = %s AND leave_date >= %s AND leave_date < %s
         """,
         (employee_id, first_day, last_day),
     )
-    leave_dates = {r[0] for r in cur.fetchall()}
+    leave_rows = cur.fetchall()
+    leave_dates = {r[0] for r in leave_rows}
+    wfh_days = len([r for r in leave_rows if r[1] == 'wfh'])
 
     # Working days = non-Sundays, capped at today so future days of an ongoing
     # month are not counted as absences.
@@ -1345,6 +1355,7 @@ def compute_employee_attendance(cur, employee_id, year, month):
             "full_days": 0,
             "half_days": 0,
             "days_needing_review": 0,
+            "wfh_days": wfh_days,
         }
 
     working_leave_days = len([d for d in leave_dates if d.weekday() != 6])
@@ -1362,6 +1373,7 @@ def compute_employee_attendance(cur, employee_id, year, month):
         "full_days": full_days,
         "half_days": half_days,
         "days_needing_review": review_days,
+        "wfh_days": wfh_days,
     }
     return True, days, summary
 
@@ -1508,10 +1520,19 @@ async def mark_leave_day(employee_id: str, data: dict, current_emp = Depends(get
     if current_emp['department'] != 'Admin':
         if employee_id != current_emp['id']:
             raise HTTPException(status_code=403, detail="Can only mark your own leave")
-    
+
     leave_type = data.get('leave_type')
     leave_date = data.get('leave_date')
-    
+
+    # Reject unknown types here rather than letting the CHECK constraint 500.
+    if leave_type not in MARKABLE_DAY_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid leave_type '{leave_type}'. Must be one of: {', '.join(MARKABLE_DAY_TYPES)}"
+        )
+    if not leave_date:
+        raise HTTPException(status_code=400, detail="leave_date is required")
+
     with get_db() as conn:
         cur = conn.cursor()
         

@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { formatDate } from '../utils/formatters';
 import { API_URL } from '../api';
 
 // Merged Leave + Biometric Attendance calendar.
@@ -7,7 +9,9 @@ import { API_URL } from '../api';
 // GET /api/employees/:id/attendance/:year/:month (source: cctv_attendance via crm_id).
 //
 // Each day cell shows ONE state, in priority order:
-//   Leave / Half-day / Paid-leave (existing)  >  Present  >  Absent  >  Sunday/neutral
+//   Leave / Half-day / Paid-leave / WFH (employee_leave_day)  >  Present  >  Absent  >  Sunday/neutral
+// WFH sits at the same priority as the leave types because it is stored the same
+// way, but it means the person WORKED — it is not leave and not a biometric present.
 export default function AttendanceCalendar({
   employeeId,
   employeeName,
@@ -23,6 +27,7 @@ export default function AttendanceCalendar({
 }) {
   const [attendance, setAttendance] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [pickerDate, setPickerDate] = useState(null); // ISO date being marked
 
   const year = month.getFullYear();
   const monthIdx = month.getMonth(); // 0-based
@@ -56,6 +61,7 @@ export default function AttendanceCalendar({
     leave: 'bg-red-100 text-red-800 border-red-300',
     half_day: 'bg-yellow-100 text-yellow-800 border-yellow-300',
     paid_leave: 'bg-blue-100 text-blue-800 border-blue-300',
+    wfh: 'bg-indigo-100 text-indigo-800 border-indigo-300',
   };
 
   // Biometric day-status colours. short_day / missing_exit are review states and
@@ -106,23 +112,29 @@ export default function AttendanceCalendar({
       onUnmarkLeave && onUnmarkLeave(ds);
       return;
     }
-    let type = null;
-    if (paidLeaveQuota > 0) {
-      type = prompt(`Mark leave for ${employeeName || 'employee'}:
-1. Leave (Full day salary deducted)
-2. Half Day (0.5 day salary deducted)
-3. Paid Leave (No deduction) - ${paidLeaveRemaining}/${paidLeaveQuota} left this month
+    setPickerDate(ds);
+  };
 
-Enter 1, 2, or 3:`);
-    } else {
-      type = prompt('Select leave type:\n1. Leave\n2. Half Day');
-    }
-    if (type === '1') onMarkLeave && onMarkLeave(ds, 'leave');
-    else if (type === '2') onMarkLeave && onMarkLeave(ds, 'half_day');
-    else if (type === '3') {
-      if (paidLeaveRemaining > 0 || paidLeaveQuota === 0) onMarkLeave && onMarkLeave(ds, 'paid_leave');
-      else alert('No paid leaves remaining for this employee');
-    }
+  // Day-type picker options. Paid Leave stays quota-gated exactly as before.
+  const pickerOptions = [
+    { type: 'leave', label: 'Leave', hint: 'Full day salary deducted', cls: 'bg-red-100 text-red-800 border-red-300' },
+    { type: 'half_day', label: 'Half Day', hint: '0.5 day salary deducted', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
+    ...(paidLeaveQuota > 0
+      ? [{
+          type: 'paid_leave',
+          label: 'Paid Leave',
+          hint: `No deduction — ${paidLeaveRemaining}/${paidLeaveQuota} left this month`,
+          cls: 'bg-blue-100 text-blue-800 border-blue-300',
+          disabled: paidLeaveRemaining <= 0,
+        }]
+      : []),
+    { type: 'wfh', label: 'Work From Home', hint: 'Worked — not leave, no deduction', cls: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
+  ];
+
+  const choosePickerType = (type) => {
+    const ds = pickerDate;
+    setPickerDate(null);
+    if (ds) onMarkLeave && onMarkLeave(ds, type);
   };
 
   const fmt = (v) => (v === null || v === undefined ? '—' : v);
@@ -165,6 +177,8 @@ Enter 1, 2, or 3:`);
           { label: 'Days Present', value: fmt(summary.days_present), cls: 'text-green-700' },
           { label: 'Full Days', value: fmt(summary.full_days), cls: 'text-green-700' },
           { label: 'Half Days', value: fmt(summary.half_days), cls: 'text-yellow-700' },
+          // WFH is marked by hand, not by the device, so it shows even when unmapped.
+          { label: 'WFH Days', value: fmt(summary.wfh_days), cls: 'text-indigo-700', alwaysShow: true },
           { label: 'Needs Review', value: fmt(summary.days_needing_review), cls: 'text-orange-700' },
           { label: 'Days Absent', value: fmt(summary.days_absent), cls: 'text-rose-700' },
           { label: 'Total Hours', value: summary.total_hours != null ? summary.total_hours : '—', cls: 'text-glass-primary' },
@@ -172,7 +186,7 @@ Enter 1, 2, or 3:`);
           { label: 'Avg Exit', value: fmt(summary.average_exit_time), cls: 'text-glass-primary' },
         ].map((c) => (
           <div key={c.label} className="glass-stat p-3 text-center">
-            <div className={`text-xl font-bold ${c.cls}`}>{mapped ? c.value : '—'}</div>
+            <div className={`text-xl font-bold ${c.cls}`}>{(mapped || c.alwaysShow) ? c.value : '—'}</div>
             <div className="text-xs text-glass-muted mt-1">{c.label}</div>
           </div>
         ))}
@@ -191,6 +205,10 @@ Enter 1, 2, or 3:`);
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-blue-200"></span>
           <span>Paid Leave: {leaveCounts?.paid_leave || 0}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-4 rounded bg-indigo-200"></span>
+          <span>Work From Home: {leaveCounts?.wfh || 0}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded bg-green-200"></span>
@@ -272,9 +290,50 @@ Enter 1, 2, or 3:`);
 
       {!readOnly && (
         <p className="text-xs text-glass-muted mt-4">
-          Click a day to mark leave; click a marked day to unmark. Present/Absent come from the
-          biometric device and update automatically.
+          Click a day to mark leave or work from home; click a marked day to unmark.
+          Present/Absent come from the biometric device and update automatically.
         </p>
+      )}
+
+      {/* Day-type picker (replaces the old numbered prompt) */}
+      {pickerDate && !readOnly && createPortal(
+        <div
+          className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-[60]"
+          onClick={() => setPickerDate(null)}
+        >
+          <div
+            className="glass-strong max-w-sm w-full p-5 animate-glass-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-glass-primary">Mark day</h3>
+            <p className="text-sm text-glass-secondary mb-4">
+              {formatDate(pickerDate)}{employeeName ? ` · ${employeeName}` : ''}
+            </p>
+            <div className="space-y-2">
+              {pickerOptions.map((opt) => (
+                <button
+                  key={opt.type}
+                  disabled={opt.disabled}
+                  onClick={() => choosePickerType(opt.type)}
+                  className={`w-full text-left border rounded-lg px-4 py-3 transition ${opt.cls} ${opt.disabled ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-80 cursor-pointer'}`}
+                >
+                  <div className="font-semibold text-sm">{opt.label}</div>
+                  <div className="text-xs opacity-80">
+                    {opt.disabled ? 'No paid leaves remaining this month' : opt.hint}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setPickerDate(null)}
+              className="mt-4 w-full px-4 py-2 rounded-lg font-medium"
+              style={{ background: '#f3f4f6', color: '#424245' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>,
+        document.body
       )}
       {readOnly && (
         <p className="text-xs text-glass-muted mt-4">
