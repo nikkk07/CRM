@@ -55,15 +55,22 @@ export default function BirthdayPopup({ people, onClose }) {
   const list = Array.isArray(people) ? people : [];
   const hasBirthdays = list.length > 0;
 
+  // onClose is an inline arrow from App, so its identity changes on every render
+  // (the leads poll re-renders App every 60s). Keeping it in a ref lets the effect
+  // below depend only on hasBirthdays — otherwise it would re-bind the listener
+  // and re-steal focus on each of those renders.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
   useEffect(() => {
     if (!hasBirthdays) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') onCloseRef.current(); };
     window.addEventListener('keydown', onKey);
     // Move focus to the dialog itself, not the × — a screen reader lands on the
     // greeting, and the first thing a sighted user sees isn't a focus ring.
     cardRef.current?.focus();
     return () => window.removeEventListener('keydown', onKey);
-  }, [hasBirthdays, onClose]);
+  }, [hasBirthdays]);
 
   if (!hasBirthdays) return null;
 
