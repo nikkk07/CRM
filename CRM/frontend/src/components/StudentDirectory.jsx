@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
 import { formatDate } from '../utils/formatters';
@@ -258,11 +258,15 @@ function StudentDetail({ studentId, onBack }) {
   const [confirmText, setConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [showPin, setShowPin] = useState(false);
-  // Setting a student PIN is Admin-only (enforced server-side); hide the button for others.
-  const isAdmin = (() => {
-    try { return JSON.parse(localStorage.getItem('employee') || '{}').department === 'Admin'; }
-    catch { return false; }
+  const [showEdit, setShowEdit] = useState(false);
+  const department = (() => {
+    try { return JSON.parse(localStorage.getItem('employee') || '{}').department; }
+    catch { return ''; }
   })();
+  // Setting a student PIN is Admin-only (enforced server-side); hide the button for others.
+  const isAdmin = department === 'Admin';
+  // Editing is Admin + Sales, mirroring _require_students_access on the server.
+  const canEdit = department === 'Admin' || department === 'Sales';
 
   const deleteStudent = async () => {
     setDeleting(true);
@@ -331,7 +335,13 @@ function StudentDetail({ studentId, onBack }) {
     <div className="glass-card p-4 sm:p-6 animate-glass-in">
       <div className="flex justify-between items-center mb-4">
         <button onClick={onBack} className="text-blue-600 hover:underline">← Back to Students</button>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
+          {canEdit && (
+            <button onClick={() => setShowEdit(true)}
+              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
+              Edit
+            </button>
+          )}
           {isAdmin && (
             <button onClick={() => setShowPin(true)}
               className="px-3 py-1 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">
@@ -395,6 +405,14 @@ function StudentDetail({ studentId, onBack }) {
         })}
       </div>
 
+      {showEdit && (
+        <EditStudent
+          student={student}
+          onClose={() => setShowEdit(false)}
+          onSaved={async () => { setShowEdit(false); await load(); }}
+        />
+      )}
+
       {showPin && (
         <SetPinModal
           studentId={studentId}
@@ -435,6 +453,163 @@ function StudentDetail({ studentId, onBack }) {
         document.body
       )}
     </div>
+  );
+}
+
+// Exactly the server's `allowed` set in update_student. id, lead_id, login_pin_hash,
+// login_enabled, created_by and created_at are deliberately absent.
+const EDITABLE_FIELDS = [
+  'first_name', 'middle_name', 'last_name', 'guardian_name', 'mobile',
+  'emergency_contact', 'address', 'course', 'admission_date', 'computer_number',
+  'date_of_birth',
+];
+
+function EditStudent({ student, onClose, onSaved }) {
+  // Inputs need '' rather than null; the original is kept so the PATCH can carry
+  // only what actually changed.
+  const initial = Object.fromEntries(EDITABLE_FIELDS.map((k) => [k, student[k] ?? '']));
+  const [form, setForm] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  // The guard is a ref, not the `saving` state: two clicks in the same tick both
+  // read the pre-render state value and both get through. A ref flips synchronously.
+  const inFlight = useRef(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (inFlight.current) return;     // a second click can't fire a second PATCH
+    if (!form.first_name.trim()) { setError('First name is required'); return; }
+    if (!form.mobile.trim()) { setError('Mobile is required'); return; }
+
+    // Changed keys only. A cleared optional field goes as null, never "" —
+    // Postgres rejects "" for date columns.
+    const payload = {};
+    for (const k of EDITABLE_FIELDS) {
+      const now = form[k].trim();
+      if (now === initial[k].trim()) continue;
+      payload[k] = now === '' ? null : now;
+    }
+    if (Object.keys(payload).length === 0) { onClose(); return; }
+
+    inFlight.current = true;
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/students/${student.id}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      inFlight.current = false;
+      setSaving(false);
+      // Failure keeps the modal open with the server's own message.
+      if (!res.ok) { setError(errorDetail(data) || `Failed to save changes (${res.status})`); return; }
+      showToast('Student updated', 'success');
+      await onSaved();
+    } catch (err) {
+      inFlight.current = false;
+      setSaving(false);
+      setError(`Failed to save changes: ${err?.message || 'network error'}`);
+    }
+  };
+
+  const input = 'w-full glass-input';
+  // Older records can hold a course that is no longer in COURSES; keep it as an
+  // option so opening this form can never silently blank it.
+  const courseOptions = !form.course || COURSES.includes(form.course)
+    ? COURSES
+    : [form.course, ...COURSES];
+
+  return createPortal(
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+      <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-start mb-4">
+          <h2 className="text-xl font-bold">Edit Student</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 rounded-lg text-sm break-words"
+            style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>
+            {error}
+          </div>
+        )}
+
+        {/* Every field carries a visible label: unlike Add Student, this form opens
+            pre-filled, so placeholders would never be shown. */}
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-glass-muted mb-1">First Name *</label>
+              <input className={input} value={form.first_name} onChange={(e) => set('first_name', e.target.value)} required />
+            </div>
+            <div>
+              <label className="block text-xs text-glass-muted mb-1">Middle Name</label>
+              <input className={input} value={form.middle_name} onChange={(e) => set('middle_name', e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs text-glass-muted mb-1">Last Name</label>
+              <input className={input} value={form.last_name} onChange={(e) => set('last_name', e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-glass-muted mb-1">Guardian's Name</label>
+            <input className={input} value={form.guardian_name} onChange={(e) => set('guardian_name', e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-glass-muted mb-1">Mobile *</label>
+            <input className={input} type="tel" value={form.mobile} onChange={(e) => set('mobile', e.target.value)} required />
+            <p className="text-xs mt-1" style={{ color: '#b45309' }}>
+              ⚠ Changing this changes the student's login number.
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs text-glass-muted mb-1">Emergency Contact</label>
+            <input className={input} type="tel" value={form.emergency_contact} onChange={(e) => set('emergency_contact', e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-glass-muted mb-1">Address</label>
+            <input className={input} value={form.address} onChange={(e) => set('address', e.target.value)} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-glass-muted mb-1">Course</label>
+              <select className={input} value={form.course} onChange={(e) => set('course', e.target.value)}>
+                <option value="">Select Course</option>
+                {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-glass-muted mb-1">Computer Number (DGCA)</label>
+              <input className={input} value={form.computer_number} onChange={(e) => set('computer_number', e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-glass-muted mb-1">Admission Date</label>
+              <input className={input} type="date" value={form.admission_date} onChange={(e) => set('admission_date', e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs text-glass-muted mb-1">Date of Birth</label>
+              <input className={input} type="date" value={form.date_of_birth} onChange={(e) => set('date_of_birth', e.target.value)} />
+            </div>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="submit" disabled={saving}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700 disabled:bg-gray-300">
+              {saving ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button type="button" onClick={onClose} disabled={saving}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-60">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body
   );
 }
 

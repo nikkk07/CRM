@@ -2079,6 +2079,25 @@ def _process_image(raw: bytes):
     return raw, 'image/jpeg', 'jpg'
 
 
+def validate_student_mobile(raw) -> str:
+    """Return the E.164 form of an Indian 10-digit mobile, or 400.
+
+    Tolerates the shapes people actually type — spaces, dashes, a +91/91/0 prefix —
+    then insists on exactly 10 digits starting 6-9. Normalization itself is delegated
+    to normalize_phone so there is one implementation of that in the codebase."""
+    digits = re.sub(r'\D', '', str(raw))
+    if len(digits) == 12 and digits.startswith('91'):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith('0'):
+        digits = digits[1:]
+    if len(digits) != 10 or digits[0] not in '6789':
+        raise HTTPException(
+            status_code=400,
+            detail="Mobile must be a 10-digit Indian mobile number (starting 6-9)",
+        )
+    return normalize_phone(digits)
+
+
 def _audit(cur, actor, action, entity, payload):
     cur.execute(
         "INSERT INTO audit_log (actor, action, entity, payload) VALUES (%s, %s, %s, %s)",
@@ -2218,28 +2237,52 @@ async def update_student(student_id: str, data: dict, current_emp = Depends(get_
     _require_students_access(current_emp)
     allowed = {'first_name', 'middle_name', 'last_name', 'guardian_name', 'address',
                'course', 'admission_date', 'computer_number', 'emergency_contact',
-               'date_of_birth'}
-    # first_name is NOT NULL; blanking it is a 400, not a 500.
-    require_fields(data, *(k for k in ('first_name',) if k in data))
+               'date_of_birth', 'mobile'}
+    # first_name and mobile are both NOT NULL; blanking either is a 400, not a 500.
+    # Blanking mobile would additionally lock the student out of their own portal.
+    require_fields(data, *(k for k in ('first_name', 'mobile') if k in data))
     # The rest are nullable: clearing an input sends "" and must store NULL.
     blank_to_none(data, 'middle_name', 'last_name', 'guardian_name', 'address', 'course',
                   'admission_date', 'computer_number', 'emergency_contact', 'date_of_birth')
     validate_dob(data)
+
+    # mobile drives mobile_normalized — the student's LOGIN identifier, and UNIQUE.
+    # Normalize once and write BOTH columns from that one value (create_student does
+    # the same): if they ever diverge, the student silently cannot sign in.
+    mobile_norm = validate_student_mobile(data['mobile']) if 'mobile' in data else None
+
     fields, values = [], []
     for k in allowed:
-        if k in data:
+        if k in data and k != 'mobile':
             val = data[k]
             if k == 'emergency_contact' and val:
                 val = normalize_phone(val)
             fields.append(f"{k} = %s")
             values.append(val)
+    if mobile_norm is not None:
+        fields.append("mobile = %s")
+        values.append(mobile_norm)
+        fields.append("mobile_normalized = %s")
+        values.append(mobile_norm)
     if not fields:
         raise HTTPException(status_code=400, detail="No editable fields provided")
     fields.append("updated_at = NOW()")
     values.append(student_id)
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute(f"UPDATE student SET {', '.join(fields)} WHERE id = %s RETURNING id", values)
+        if mobile_norm is not None:
+            # Clean 409 instead of a raw UNIQUE violation; the except below closes
+            # the race between this check and the UPDATE.
+            cur.execute(
+                "SELECT 1 FROM student WHERE mobile_normalized = %s AND id <> %s",
+                (mobile_norm, student_id),
+            )
+            if cur.fetchone():
+                raise HTTPException(status_code=409, detail="A student with this mobile number already exists")
+        try:
+            cur.execute(f"UPDATE student SET {', '.join(fields)} WHERE id = %s RETURNING id", values)
+        except psycopg.errors.UniqueViolation:
+            raise HTTPException(status_code=409, detail="A student with this mobile number already exists")
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Student not found")
         _audit(cur, current_emp['id'], 'edit', 'student',
