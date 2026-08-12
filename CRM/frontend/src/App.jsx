@@ -5,6 +5,7 @@ import EmployeeLogin from './components/EmployeeLogin';
 import StudentLogin from './components/StudentLogin';
 import LeadList from './components/LeadList';
 import LoadingSpinner from './components/LoadingSpinner';
+import BirthdayPopup from './components/BirthdayPopup';
 import { apiFetch, fetchConfig, API_URL } from './api';
 
 // Code-split everything that isn't needed for the first paint. Each of these
@@ -22,6 +23,10 @@ const AddQuery = lazy(() => import('./components/AddQuery'));
 const StudentDirectory = lazy(() => import('./components/StudentDirectory'));
 const Attendance = lazy(() => import('./components/Attendance'));
 
+// Tabs the birthday popup is allowed to appear over: the landing tab plus the
+// two people-facing views. Anywhere else it would be an interruption.
+const BIRTHDAY_TABS = ['leads', 'team', 'attendance'];
+
 export default function App() {
   const [employee, setEmployee] = useState(null);
   const [showEmployeeLogin, setShowEmployeeLogin] = useState(false);
@@ -38,6 +43,10 @@ export default function App() {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ old_password: '', new_password: '', confirm_password: '' });
   const [passwordError, setPasswordError] = useState('');
+  const [birthdays, setBirthdays] = useState([]);
+  // Session-scoped dismissal: React state only. localStorage/sessionStorage are
+  // unsupported for this, and the popup should come back on the next sign-in.
+  const [birthdayDismissed, setBirthdayDismissed] = useState(false);
 
   const isEmployeeSession = employee?.is_employee_session === true;
   const department = employee?.department || '';
@@ -73,6 +82,18 @@ export default function App() {
     if (!employee || !token) return;
     if (isEmployeeSession && !canAccessLeads) return;
     fetchConfig(token).then(setConfig).catch(() => { /* keep defaults */ });
+  }, [employee]);
+
+  // Today's birthdays: fetched ONCE when the session starts and passed down.
+  // Deliberately not part of syncNow() — it changes at most once a day, so
+  // polling it every 60s alongside the leads would be pure waste.
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!employee || !token) return;
+    apiFetch('/api/birthdays/today', { token })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => setBirthdays(Array.isArray(data) ? data : []))
+      .catch(() => { /* a missed birthday must never break the app */ });
   }, [employee]);
 
   const syncNow = async () => {
@@ -234,6 +255,12 @@ export default function App() {
         {showOutbox && <Outbox onClose={() => setShowOutbox(false)} />}
         {showAddQuery && <AddQuery requiredQualification={config.eligibility_required_qualification || '12th with Physics & Maths'} onClose={() => setShowAddQuery(false)} onCreated={() => { setShowAddQuery(false); syncNow(); }} onOpenExisting={(leadId) => { setShowAddQuery(false); const existing = leads.find(l => l.id === leadId); if (existing) setSelectedLead(existing); }} />}
       </Suspense>
+
+      {/* Only on the landing tab and the two people-facing tabs. BirthdayPopup
+          itself renders nothing when nobody has a birthday today. */}
+      {!birthdayDismissed && BIRTHDAY_TABS.includes(activeTab) && (
+        <BirthdayPopup people={birthdays} onClose={() => setBirthdayDismissed(true)} />
+      )}
 
       {showChangePassword && createPortal(
         <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">

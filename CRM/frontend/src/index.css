@@ -461,3 +461,49 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
     backdrop-filter: none; -webkit-backdrop-filter: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Birthday popup (BirthdayPopup.jsx)
+   -----------------------------------------------------------------
+   Restrained by design: a 200ms scale+fade entrance on the card, and a
+   slow, low-opacity confetti layer BEHIND it that falls once and settles
+   (animation-iteration-count: 1) rather than looping forever.
+   Pure CSS — no library, no canvas. Both are removed entirely under
+   prefers-reduced-motion (the global reduced-motion rule collapses
+   durations to 0.01ms, which would make confetti flash rather than
+   animate, so the layer is hidden outright instead).
+   ═══════════════════════════════════════════════════════════════ */
+@keyframes bdCardIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.bd-card { animation: bdCardIn 0.2s var(--ease) both; }
+
+.bd-confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;      /* drift can never push the page sideways */
+  pointer-events: none;
+}
+.bd-confetti > i {
+  position: absolute;
+  top: -6%;
+  display: block;
+  opacity: 0;
+  animation-name: bdConfettiFall;
+  animation-timing-function: cubic-bezier(0.25, 0.6, 0.35, 1);
+  animation-iteration-count: 1;
+  animation-fill-mode: forwards;   /* settles out; never restarts */
+  will-change: transform, opacity;
+}
+@keyframes bdConfettiFall {
+  0%   { opacity: 0;    transform: translate3d(0, 0, 0) rotate(0deg); }
+  10%  { opacity: 0.45; }
+  85%  { opacity: 0.32; }
+  100% { opacity: 0;    transform: translate3d(var(--dx, 0), 108vh, 0) rotate(var(--spin, 180deg)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bd-confetti { display: none; }
+  .bd-card { animation: none; }
+}

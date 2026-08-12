@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
+import { formatDate } from '../utils/formatters';
 import { showToast } from '../utils/toast';
 import { COURSES } from '../constants/courses';
 
@@ -131,7 +132,8 @@ export default function StudentDirectory() {
 function AddStudent({ onClose, onCreated, onOpenExisting }) {
   const [form, setForm] = useState({
     first_name: '', middle_name: '', last_name: '', guardian_name: '', mobile: '',
-    emergency_contact: '', address: '', course: '', computer_number: '', admission_date: '', lead_id: '',
+    emergency_contact: '', address: '', course: '', computer_number: '', admission_date: '',
+    date_of_birth: '', lead_id: '',
   });
   const [leads, setLeads] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -228,9 +230,16 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
             </select>
             <input className={input} placeholder="Computer Number (DGCA)" value={form.computer_number} onChange={(e) => set('computer_number', e.target.value)} />
           </div>
-          <div>
-            <label className="block text-xs text-glass-muted mb-1">Admission Date</label>
-            <input className={input} type="date" value={form.admission_date} onChange={(e) => set('admission_date', e.target.value)} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-glass-muted mb-1">Admission Date</label>
+              <input className={input} type="date" value={form.admission_date} onChange={(e) => set('admission_date', e.target.value)} />
+            </div>
+            <div>
+              {/* Optional — blank is mapped to null with the other fields in submit(). */}
+              <label className="block text-xs text-glass-muted mb-1">Date of Birth</label>
+              <input className={input} type="date" value={form.date_of_birth} onChange={(e) => set('date_of_birth', e.target.value)} />
+            </div>
           </div>
           <button type="submit" disabled={saving} className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400">
             {saving ? 'Saving…' : 'Save Student'}
@@ -347,6 +356,7 @@ function StudentDetail({ studentId, onBack }) {
         {field('Emergency Contact', student.emergency_contact)}
         {field('Computer Number (DGCA)', student.computer_number)}
         {field('Admission Date', student.admission_date)}
+        {field('Date of Birth', student.date_of_birth ? formatDate(student.date_of_birth) : '—')}
         {field('Address', student.address)}
       </div>
 

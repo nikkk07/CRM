@@ -18,6 +18,7 @@ from sla_monitor import start_sla_monitor
 from quote_generator import generate_quote_pdf
 from encryption import encrypt_value, decrypt_value
 from mongo_bridge import start_mongo_bridge
+import calendar
 import json
 import re
 import time
@@ -69,6 +70,39 @@ def require_fields(data: dict, *fields: str) -> None:
         v = data.get(f)
         if v is None or (isinstance(v, str) and not v.strip()):
             raise HTTPException(status_code=400, detail=f"{f} is required")
+
+
+# Nobody on the roster was born before this many years ago; anything older (or in
+# the future) is a mistyped year, and a wrong DOB means a wrong birthday popup.
+MAX_AGE_YEARS = 100
+
+
+def validate_dob(data: dict, field: str = 'date_of_birth') -> None:
+    """Range-check an optional date of birth. Call AFTER blank_to_none, so a blank
+    input (already None by then) is simply skipped and stored as NULL.
+    Uses _IST (defined in the attendance section below, resolved at call time) so
+    "today" is the institute's day, not the server's UTC day."""
+    raw = data.get(field)
+    if raw is None:
+        return
+    try:
+        dob = date.fromisoformat(str(raw)[:10])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date of birth must be a valid date (YYYY-MM-DD)")
+    today = datetime.now(_IST).date()
+    if dob > today:
+        raise HTTPException(status_code=400, detail="Date of birth cannot be in the future")
+    try:
+        earliest = today.replace(year=today.year - MAX_AGE_YEARS)
+    except ValueError:
+        # 29 Feb today, and the year MAX_AGE_YEARS back is not a leap year.
+        earliest = today.replace(year=today.year - MAX_AGE_YEARS, month=2, day=28)
+    if dob < earliest:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Date of birth cannot be more than {MAX_AGE_YEARS} years ago",
+        )
+    data[field] = dob.isoformat()
 
 
 scheduler = None
@@ -1029,7 +1063,7 @@ async def get_employees(current_emp = Depends(get_current_employee)):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, employee_id, name, job_role, joining_date, status
+            SELECT id, employee_id, name, job_role, joining_date, status, date_of_birth
             FROM employee
             WHERE active = true
             ORDER BY name
@@ -1042,7 +1076,8 @@ async def get_employees(current_emp = Depends(get_current_employee)):
                 "name": r[2],
                 "job_role": r[3],
                 "joining_date": r[4].isoformat() if r[4] else None,
-                "status": r[5] or 'active'
+                "status": r[5] or 'active',
+                "date_of_birth": r[6].isoformat() if r[6] else None
             })
     return employees
 
@@ -1056,9 +1091,9 @@ async def get_employee_detail(employee_id: str, current_emp = Depends(get_curren
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, employee_id, name, phone, email, job_role, address, 
+            SELECT id, employee_id, name, phone, email, job_role, address,
                    pay_scale_encrypted, joining_date, status, date_of_leaving,
-                   paid_leave_quota, monthly_salary, department
+                   paid_leave_quota, monthly_salary, department, date_of_birth
             FROM employee
             WHERE id = %s
         """, (employee_id,))
@@ -1157,6 +1192,7 @@ async def get_employee_detail(employee_id: str, current_emp = Depends(get_curren
             "paid_leave_quota": row[11] if row[11] else 0,
             "monthly_salary": float(row[12]) if row[12] else None,
             "department": row[13],
+            "date_of_birth": row[14].isoformat() if row[14] else None,
             "leave_days": leave_days,
             "leave_counts": leave_counts,
             "paid_leave_used": paid_leave_used,
@@ -1413,7 +1449,8 @@ async def create_employee(data: dict, current_emp = Depends(get_current_employee
     # numeric: "" from the form has to become NULL, not reach Postgres as a string.
     blank_to_none(data, 'employee_id', 'email', 'job_role', 'address', 'pay_scale',
                   'joining_date', 'date_of_leaving', 'login_pin',
-                  'paid_leave_quota', 'monthly_salary')
+                  'paid_leave_quota', 'monthly_salary', 'date_of_birth')
+    validate_dob(data)
     with get_db() as conn:
         cur = conn.cursor()
 
@@ -1445,9 +1482,9 @@ async def create_employee(data: dict, current_emp = Depends(get_current_employee
             cur.execute(
                 """INSERT INTO employee (
                     employee_id, login_id, login_pin, name, phone, email, job_role, address,
-                    pay_scale_encrypted, joining_date, status, date_of_leaving,
+                    pay_scale_encrypted, joining_date, status, date_of_leaving, date_of_birth,
                     department, password_hash, permissions
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id""",
                 (
                     data.get('employee_id'), login_id, login_pin,
@@ -1455,6 +1492,7 @@ async def create_employee(data: dict, current_emp = Depends(get_current_employee
                     data.get('email'), data.get('job_role'), data.get('address'),
                     pay_scale_encrypted, data.get('joining_date'),
                     data.get('status') or 'active', data.get('date_of_leaving'),
+                    data.get('date_of_birth'),
                     department,
                     hash_password(data.get('password', 'welcome123')),
                     json.dumps(data.get('permissions', {}))
@@ -1483,7 +1521,11 @@ async def update_employee(employee_id: str, data: dict, current_emp = Depends(ge
     
     if 'department' in data and current_emp['department'] != 'Admin':
         raise HTTPException(status_code=403, detail="Only Admin can change department")
-    
+
+    # Clearing the DOB input sends "" and must store NULL, not reach the DATE column.
+    blank_to_none(data, 'date_of_birth')
+    validate_dob(data)
+
     with get_db() as conn:
         cur = conn.cursor()
         fields = []
@@ -1493,7 +1535,8 @@ async def update_employee(employee_id: str, data: dict, current_emp = Depends(ge
             'employee_id': 'employee_id', 'name': 'name', 'phone': 'phone',
             'email': 'email', 'job_role': 'job_role', 'address': 'address',
             'joining_date': 'joining_date', 'status': 'status', 
-            'date_of_leaving': 'date_of_leaving', 'login_pin': 'login_pin',
+            'date_of_leaving': 'date_of_leaving', 'date_of_birth': 'date_of_birth',
+            'login_pin': 'login_pin',
             'paid_leave_quota': 'paid_leave_quota', 'monthly_salary': 'monthly_salary',
             'department': 'department', 'login_id': 'login_id'
         }
@@ -2051,7 +2094,7 @@ async def list_students(search: str = "", current_emp = Depends(get_current_empl
         like = f"%{search.strip()}%"
         cur.execute("""
             SELECT s.id, s.first_name, s.middle_name, s.last_name, s.mobile, s.course,
-                   s.admission_date, s.computer_number,
+                   s.admission_date, s.computer_number, s.date_of_birth,
                    (SELECT COUNT(DISTINCT doc_type) FROM student_document WHERE student_id = s.id) AS doc_count
             FROM student s
             WHERE (%s = '' OR
@@ -2067,7 +2110,8 @@ async def list_students(search: str = "", current_emp = Depends(get_current_empl
                 "mobile": r[4], "course": r[5],
                 "admission_date": r[6].isoformat() if r[6] else None,
                 "computer_number": r[7],
-                "documents_complete": r[8], "documents_total": total,
+                "date_of_birth": r[8].isoformat() if r[8] else None,
+                "documents_complete": r[9], "documents_total": total,
             }
             for r in cur.fetchall()
         ]
@@ -2099,7 +2143,8 @@ async def get_student(student_id: str, current_emp = Depends(get_current_employe
         cur = conn.cursor()
         cur.execute("""
             SELECT id, first_name, middle_name, last_name, guardian_name, mobile,
-                   emergency_contact, address, course, admission_date, computer_number, lead_id, created_at
+                   emergency_contact, address, course, admission_date, computer_number, lead_id,
+                   created_at, date_of_birth
             FROM student WHERE id = %s
         """, (student_id,))
         r = cur.fetchone()
@@ -2111,6 +2156,7 @@ async def get_student(student_id: str, current_emp = Depends(get_current_employe
             "course": r[8], "admission_date": r[9].isoformat() if r[9] else None,
             "computer_number": r[10], "lead_id": str(r[11]) if r[11] else None,
             "created_at": r[12].isoformat() if r[12] else None,
+            "date_of_birth": r[13].isoformat() if r[13] else None,
         }
         cur.execute("""
             SELECT id, doc_type, original_filename, mime_type, size_bytes, uploaded_at
@@ -2135,7 +2181,9 @@ async def create_student(data: dict, current_emp = Depends(get_current_employee)
     # Every column below this line is nullable: "" from the form must become NULL.
     # last_name included — single-name students are common (migration 032).
     blank_to_none(data, 'middle_name', 'last_name', 'guardian_name', 'emergency_contact',
-                  'address', 'course', 'admission_date', 'computer_number', 'lead_id')
+                  'address', 'course', 'admission_date', 'computer_number', 'lead_id',
+                  'date_of_birth')
+    validate_dob(data)
     first = data['first_name'].strip()
     last = (data.get('last_name') or '').strip() or None
     raw_mobile = data['mobile'].strip()
@@ -2153,13 +2201,13 @@ async def create_student(data: dict, current_emp = Depends(get_current_employee)
         cur.execute("""
             INSERT INTO student (first_name, middle_name, last_name, guardian_name, mobile,
                                  mobile_normalized, emergency_contact, address, course,
-                                 admission_date, computer_number, lead_id, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s, %s, %s)
+                                 admission_date, computer_number, lead_id, date_of_birth, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s, %s, %s, %s)
             RETURNING id
         """, (first, data.get('middle_name'), last, data.get('guardian_name'), mobile_norm,
               mobile_norm, emergency, data.get('address'), data.get('course'),
               data.get('admission_date'), data.get('computer_number'), data.get('lead_id'),
-              current_emp['id']))
+              data.get('date_of_birth'), current_emp['id']))
         student_id = cur.fetchone()[0]
         _audit(cur, current_emp['id'], 'create', 'student', {"student_id": str(student_id)})
         return {"status": "created", "student_id": str(student_id)}
@@ -2169,12 +2217,14 @@ async def create_student(data: dict, current_emp = Depends(get_current_employee)
 async def update_student(student_id: str, data: dict, current_emp = Depends(get_current_employee)):
     _require_students_access(current_emp)
     allowed = {'first_name', 'middle_name', 'last_name', 'guardian_name', 'address',
-               'course', 'admission_date', 'computer_number', 'emergency_contact'}
+               'course', 'admission_date', 'computer_number', 'emergency_contact',
+               'date_of_birth'}
     # first_name is NOT NULL; blanking it is a 400, not a 500.
     require_fields(data, *(k for k in ('first_name',) if k in data))
     # The rest are nullable: clearing an input sends "" and must store NULL.
     blank_to_none(data, 'middle_name', 'last_name', 'guardian_name', 'address', 'course',
-                  'admission_date', 'computer_number', 'emergency_contact')
+                  'admission_date', 'computer_number', 'emergency_contact', 'date_of_birth')
+    validate_dob(data)
     fields, values = [], []
     for k in allowed:
         if k in data:
@@ -2478,6 +2528,71 @@ async def set_student_pin(student_id: str, data: dict, current_emp = Depends(get
                {"student_id": student_id, "pin_changed": pin is not None,
                 "login_enabled": login_enabled})
     return {"status": "updated"}
+
+
+# ---------------------------------------------------------------------------
+# Birthdays
+# ---------------------------------------------------------------------------
+
+@app.get("/api/birthdays/today")
+def birthdays_today(current_emp = Depends(get_current_employee)):  # sync → threadpool
+    """Everyone (employees + students) whose birthday falls on today's IST date.
+
+    Matched by MONTH and DAY only — the year in date_of_birth is the birth year and
+    would never equal today's. Deliberately open to every authenticated CRM user
+    (employee sessions included) so the popup works on any tab they can reach;
+    get_current_employee already rejects student tokens, which matters here because
+    the response carries other people's names.
+    """
+    today = datetime.now(_IST).date()
+    # A 29 Feb birthday has no date to land on in a common year: show it on 28 Feb.
+    include_feb29 = (today.month, today.day) == (2, 28) and not calendar.isleap(today.year)
+
+    # Same predicate for both tables; matching on the two EXTRACTs keeps it a plain
+    # comparison per row (no per-row date construction) and the tables are small.
+    day_match = """
+        date_of_birth IS NOT NULL
+        AND (
+            (EXTRACT(MONTH FROM date_of_birth) = %s AND EXTRACT(DAY FROM date_of_birth) = %s)
+            OR (%s AND EXTRACT(MONTH FROM date_of_birth) = 2
+                   AND EXTRACT(DAY FROM date_of_birth) = 29)
+        )
+    """
+    params = (today.month, today.day, include_feb29)
+
+    people = []
+    with get_db() as conn:
+        cur = conn.cursor()
+        # active = true excludes deleted rows, status excludes people who have left —
+        # both conventions are already used by /api/employees and the directory UI.
+        cur.execute(f"""
+            SELECT id, name, job_role, department
+            FROM employee
+            WHERE active = true
+              AND COALESCE(status, 'active') <> 'non-active'
+              AND {day_match}
+            ORDER BY name
+        """, params)
+        for r in cur.fetchall():
+            people.append({
+                "id": str(r[0]), "name": r[1], "type": "employee",
+                "job_role": r[2], "department": r[3],
+            })
+
+        # Students are hard-deleted (no active flag), so presence in the table is enough.
+        cur.execute(f"""
+            SELECT id, first_name, middle_name, last_name, course
+            FROM student
+            WHERE {day_match}
+            ORDER BY first_name, last_name
+        """, params)
+        for r in cur.fetchall():
+            people.append({
+                "id": str(r[0]),
+                "name": " ".join(x for x in [r[1], r[2], r[3]] if x),
+                "type": "student", "course": r[4],
+            })
+    return people
 
 
 # ---------------------------------------------------------------------------
