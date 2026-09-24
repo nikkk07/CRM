@@ -7,6 +7,7 @@ import LeadList from './components/LeadList';
 import LoadingSpinner from './components/LoadingSpinner';
 import BirthdayPopup from './components/BirthdayPopup';
 import { apiFetch, fetchConfig, API_URL } from './api';
+import { SEGMENTS, segmentOf } from './utils/charter';
 
 // Code-split everything that isn't needed for the first paint. Each of these
 // tabs/modals now ships as its own chunk fetched on demand, so a Sales user
@@ -40,6 +41,13 @@ export default function App() {
   const [showAddQuery, setShowAddQuery] = useState(false);
   const [config, setConfig] = useState({});
   const [activeTab, setActiveTab] = useState('leads');
+  // Aviation (pilot training) or Charter (Book My Charter). Remembered per
+  // browser so a charter desk stays on Charter; falls back safely if storage
+  // is unavailable.
+  const [segment, setSegmentState] = useState(() => {
+    try { return localStorage.getItem('lead_segment') === 'charter' ? 'charter' : 'aviation'; } catch { return 'aviation'; }
+  });
+  const setSegment = (value) => { setSegmentState(value); try { localStorage.setItem('lead_segment', value); } catch { /* ignore */ } };
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ old_password: '', new_password: '', confirm_password: '' });
   const [passwordError, setPasswordError] = useState('');
@@ -206,18 +214,40 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'leads' && canAccessLeads && !leadsError && (
+        {activeTab === 'leads' && canAccessLeads && !leadsError && (() => {
+          const segmentLeads = leads.filter(l => segmentOf(l) === segment);
+          const segmentIds = new Set(segmentLeads.map(l => l.id));
+          const segmentFollowups = followups.filter(f => segmentIds.has(f.lead_id));
+          const untouched = (list) => list.filter(l => !l.first_contacted_at).length;
+          return (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">Total Leads</div><div className="text-2xl font-bold text-glass-primary">{leads.length}</div></div>
-              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">Untouched</div><div className="text-2xl font-bold text-orange-600">{leads.filter(l => !l.first_contacted_at).length}</div></div>
-              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">Pending Follow-ups</div><div className="text-2xl font-bold text-blue-600">{followups.length}</div></div>
+            {/* Aviation / Charter switch. Each segment has its own counts,
+                follow-ups, filters and Add Query form. */}
+            <div className="grid grid-cols-2 gap-2 mb-4 p-1 rounded-xl" style={{ background: 'rgba(0,0,0,0.05)' }} role="tablist" aria-label="Lead segment">
+              {SEGMENTS.map(s => {
+                const list = leads.filter(l => segmentOf(l) === s.id);
+                const active = segment === s.id;
+                const fresh = untouched(list);
+                return (
+                  <button key={s.id} role="tab" aria-selected={active} onClick={() => setSegment(s.id)}
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm sm:text-base font-semibold transition ${active ? 'bg-indigo-600 text-white shadow' : 'text-glass-secondary hover:text-glass-primary hover:bg-white/60'}`}>
+                    <span aria-hidden="true">{s.icon}</span>{s.label}
+                    <span className="text-xs font-medium opacity-80">({list.length})</span>
+                    {fresh > 0 && <span className="ml-1 min-w-[1.25rem] px-1.5 rounded-full bg-orange-500 text-white text-xs leading-5">{fresh}</span>}
+                  </button>
+                );
+              })}
             </div>
-            {followups.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">{segment === 'charter' ? 'Charter Enquiries' : 'Total Leads'}</div><div className="text-2xl font-bold text-glass-primary">{segmentLeads.length}</div></div>
+              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">Untouched</div><div className="text-2xl font-bold text-orange-600">{untouched(segmentLeads)}</div></div>
+              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">Pending Follow-ups</div><div className="text-2xl font-bold text-blue-600">{segmentFollowups.length}</div></div>
+            </div>
+            {segmentFollowups.length > 0 && (
               <div className="glass-card p-4 mb-4" style={{ background: '#fffbe6', borderColor: '#fde047' }}>
                 <h3 className="font-semibold mb-2 text-glass-primary">⏰ Follow-ups Due</h3>
                 <div className="space-y-2">
-                  {followups.slice(0, 3).map(f => (
+                  {segmentFollowups.slice(0, 3).map(f => (
                     <div key={f.id} className="flex justify-between items-center text-sm">
                       <span className="text-glass-primary"><span className="font-semibold">{f.lead_name}</span> - {f.reason}</span>
                       <button onClick={() => { const lead = leads.find(l => l.id === f.lead_id); if (lead) setSelectedLead(lead); }} className="text-indigo-600 hover:underline font-medium">Contact</button>
@@ -228,16 +258,17 @@ export default function App() {
             )}
             <div className="glass-card p-4">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold text-glass-primary">Leads</h2>
+                <h2 className="text-lg font-semibold text-glass-primary">{segment === 'charter' ? 'Charter Leads' : 'Aviation Leads'}</h2>
                 <div className="flex gap-2">
-                  <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2" style={{ background: '#22c55e' }}>＋ Add Query</button>
+                  <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2" style={{ background: '#22c55e' }}>＋ {segment === 'charter' ? 'Add Enquiry' : 'Add Query'}</button>
                   <button onClick={syncNow} className="glass-btn px-4 py-2">Sync</button>
                 </div>
               </div>
-              <LeadList leads={leads} onSelectLead={setSelectedLead} />
+              <LeadList leads={segmentLeads} segment={segment} onSelectLead={setSelectedLead} />
             </div>
           </>
-        )}
+          );
+        })()}
 
         <Suspense fallback={<LoadingSpinner />}>
           {activeTab === 'students' && canAccessLeads && <StudentDirectory />}
@@ -253,7 +284,7 @@ export default function App() {
       <Suspense fallback={null}>
         {selectedLead && <LeadDetail lead={selectedLead} onClose={() => setSelectedLead(null)} onContact={handleContact} />}
         {showOutbox && <Outbox onClose={() => setShowOutbox(false)} />}
-        {showAddQuery && <AddQuery requiredQualification={config.eligibility_required_qualification || '12th with Physics & Maths'} onClose={() => setShowAddQuery(false)} onCreated={() => { setShowAddQuery(false); syncNow(); }} onOpenExisting={(leadId) => { setShowAddQuery(false); const existing = leads.find(l => l.id === leadId); if (existing) setSelectedLead(existing); }} />}
+        {showAddQuery && <AddQuery segment={segment} requiredQualification={config.eligibility_required_qualification || '12th with Physics & Maths'} onClose={() => setShowAddQuery(false)} onCreated={() => { setShowAddQuery(false); syncNow(); }} onOpenExisting={(leadId) => { setShowAddQuery(false); const existing = leads.find(l => l.id === leadId); if (existing) setSelectedLead(existing); }} />}
       </Suspense>
 
       {/* Only on the landing tab and the two people-facing tabs. BirthdayPopup

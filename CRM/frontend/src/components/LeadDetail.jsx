@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import QuoteGenerator from './QuoteGenerator';
+import { CLOSURE, charterRef, formatTime, formatTripDate, labelOf, routeLine, segmentOf, shortPlace } from '../utils/charter';
 
 export default function LeadDetail({ lead, onClose, onContact }) {
   const [disposition, setDisposition] = useState('');
@@ -10,17 +11,37 @@ export default function LeadDetail({ lead, onClose, onContact }) {
   const [followupDate, setFollowupDate] = useState('');
   const [followupReason, setFollowupReason] = useState('');
   const [showQuoteGen, setShowQuoteGen] = useState(false);
+  const isCharter = segmentOf(lead) === 'charter';
+  const closure = CLOSURE[isCharter ? 'charter' : 'aviation'];
+  const trip = lead.charter_details || {};
 
   const handleSave = async () => {
     if (!disposition) { alert('Select a disposition first'); return; }
-    if (disposition === 'Closed') { if (!closureOutcome) { alert('Select Admission Completed or Admission Aborted'); return; } await onContact(lead.id, { closure_outcome: closureOutcome, note }); setDisposition(''); setClosureOutcome(''); setTrack(''); setNote(''); onClose(); return; }
-    if (disposition === 'Interested' && !track) { alert('Select a track (CPL / PPL / Flying)'); return; }
-    await onContact(lead.id, { channel: 'phone', disposition, note, ...(disposition === 'Interested' ? { interest_track: track } : {}) });
+    if (disposition === 'Closed') { if (!closureOutcome) { alert(`Select ${closure.positive.label} or ${closure.negative.label}`); return; } await onContact(lead.id, { closure_outcome: closureOutcome, note }); setDisposition(''); setClosureOutcome(''); setTrack(''); setNote(''); onClose(); return; }
+    if (disposition === 'Interested' && !isCharter && !track) { alert('Select a track (CPL / PPL / Flying)'); return; }
+    await onContact(lead.id, { channel: 'phone', disposition, note, ...(disposition === 'Interested' && !isCharter ? { interest_track: track } : {}) });
     if (disposition === 'Callback' && followupDate) { await onContact(lead.id, { followup: true, due_date: followupDate, reason: followupReason }); }
     setDisposition(''); setTrack(''); setNote(''); onClose();
   };
 
-  const waLink = `https://wa.me/${lead.phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hello ' + lead.name + ', this is We One Aviation regarding your enquiry.')}`;
+  const waText = isCharter
+    ? `Hello ${lead.name}, this is Book My Charter regarding your charter enquiry ${charterRef(lead.id)} (${routeLine(trip)}${trip.departureDate ? `, ${formatTripDate(trip.departureDate)}` : ''}).`
+    : `Hello ${lead.name}, this is We One Aviation regarding your enquiry.`;
+  const waLink = `https://wa.me/${lead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(waText)}`;
+
+  const tripRows = isCharter ? [
+    ['From', trip.from],
+    ['To', trip.to],
+    ['Departure', [formatTripDate(trip.departureDate), formatTime(trip.departureTime)].filter(Boolean).join(' · ') || null],
+    ['Trip', trip.tripType ? labelOf(trip.tripType) : null],
+    ['Return', trip.returnDate ? formatTripDate(trip.returnDate) : null],
+    ['Passengers', trip.passengers],
+    ['Aircraft preference', trip.aircraftPreference ? labelOf(trip.aircraftPreference) : null],
+    ['Purpose', trip.purpose ? labelOf(trip.purpose) : null],
+    ['Flexible dates', trip.flexibleDates ? 'Yes' : null],
+    ['Requirements', trip.additionalRequirements],
+    ['Page', trip.sourcePath],
+  ].filter(([, v]) => v !== null && v !== undefined && v !== '') : [];
 
   const dispoBtn = (val, label, activeCls, icon) => (
     <button onClick={() => setDisposition(val)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${disposition === val ? activeCls : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`} style={disposition === val ? {} : { borderColor: '#d2d2d7' }}>{icon} {label}</button>
@@ -39,13 +60,30 @@ export default function LeadDetail({ lead, onClose, onContact }) {
             </div>
             <button onClick={() => { setTrack(''); onClose(); }} className="text-glass-muted hover:text-glass-primary text-2xl">×</button>
           </div>
+          {isCharter && (
+            <div className="mb-4 p-4 glass-subtle">
+              <div className="flex justify-between items-baseline gap-3 mb-3">
+                <h3 className="font-semibold text-glass-primary">🛩️ {shortPlace(trip.from)} → {shortPlace(trip.to)}</h3>
+                <span className="text-xs font-mono text-glass-muted">{charterRef(lead.id)}</span>
+              </div>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+                {tripRows.map(([k, v]) => (
+                  <div key={k} className="contents">
+                    <dt className="text-glass-secondary">{k}</dt>
+                    <dd className="text-glass-primary break-words">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
           <div className="mb-6 space-y-2 text-sm text-glass-primary">
-            <div><span className="font-semibold">Course:</span> {lead.course_interest}</div>
-            <div><span className="font-semibold">Address:</span> {lead.address || 'N/A'}</div>
+            {!isCharter && <div><span className="font-semibold">Course:</span> {lead.course_interest}</div>}
+            {!isCharter && <div><span className="font-semibold">Address:</span> {lead.address || 'N/A'}</div>}
             {lead.utm_source && <div><span className="font-semibold">Source:</span> {lead.utm_source} / {lead.utm_medium} / {lead.utm_campaign}</div>}
             <div><span className="font-semibold">Status:</span> {lead.status}{lead.first_contacted_at && <span className="ml-2 text-green-600">✓ Contacted</span>}</div>
           </div>
-          <div className="mb-4"><button onClick={() => setShowQuoteGen(true)} className="glass-btn w-full py-3" style={{ background: '#7c3aed' }}>📄 Generate Quote</button></div>
+          {/* Course-fee quotes only: a charter quote is priced per trip. */}
+          {!isCharter && <div className="mb-4"><button onClick={() => setShowQuoteGen(true)} className="glass-btn w-full py-3" style={{ background: '#7c3aed' }}>📄 Generate Quote</button></div>}
           <div className="mb-4">
             <h3 className="font-semibold mb-3 text-lg text-glass-primary">Contact Lead</h3>
             <div className="flex gap-3 mb-4">
@@ -63,7 +101,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
               <button onClick={() => { setDisposition('Closed'); setClosureOutcome(''); }} className={`py-3 px-3 rounded-lg border-2 transition font-semibold col-span-2 ${disposition === 'Closed' ? 'border-slate-800 bg-slate-50 text-slate-800' : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`} style={disposition === 'Closed' ? {} : { borderColor: '#d2d2d7' }}>🔒 Closed</button>
             </div>
           </div>
-          {disposition === 'Interested' && (
+          {disposition === 'Interested' && !isCharter && (
             <div className="mb-4 p-3 glass-subtle">
               <label className="block text-sm font-semibold mb-2 text-glass-primary">Course Track *</label>
               <div className="flex flex-wrap gap-2">
@@ -77,8 +115,8 @@ export default function LeadDetail({ lead, onClose, onContact }) {
             <div className="mb-4 p-3 glass-subtle">
               <label className="block text-sm font-semibold mb-2 text-glass-primary">Closure Outcome *</label>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => setClosureOutcome('admission_completed')} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${closureOutcome === 'admission_completed' ? 'border-green-600 bg-green-50 text-green-700' : 'glass-subtle text-glass-secondary'}`} style={closureOutcome === 'admission_completed' ? {} : { borderColor: '#d2d2d7' }}>✓ Admission Completed</button>
-                <button onClick={() => setClosureOutcome('admission_aborted')} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${closureOutcome === 'admission_aborted' ? 'border-red-600 bg-red-50 text-red-700' : 'glass-subtle text-glass-secondary'}`} style={closureOutcome === 'admission_aborted' ? {} : { borderColor: '#d2d2d7' }}>✗ Admission Aborted</button>
+                <button onClick={() => setClosureOutcome(closure.positive.value)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${closureOutcome === closure.positive.value ? 'border-green-600 bg-green-50 text-green-700' : 'glass-subtle text-glass-secondary'}`} style={closureOutcome === closure.positive.value ? {} : { borderColor: '#d2d2d7' }}>✓ {closure.positive.label}</button>
+                <button onClick={() => setClosureOutcome(closure.negative.value)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${closureOutcome === closure.negative.value ? 'border-red-600 bg-red-50 text-red-700' : 'glass-subtle text-glass-secondary'}`} style={closureOutcome === closure.negative.value ? {} : { borderColor: '#d2d2d7' }}>✗ {closure.negative.label}</button>
               </div>
             </div>
           )}
@@ -87,7 +125,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
               <label className="block text-sm font-semibold mb-1 text-glass-primary">Follow-up Date</label>
               <input type="datetime-local" value={followupDate} onChange={(e) => setFollowupDate(e.target.value)} className="glass-input w-full px-3 py-2 mb-2" />
               <label className="block text-sm font-semibold mb-1 text-glass-primary">Reason</label>
-              <input type="text" value={followupReason} onChange={(e) => setFollowupReason(e.target.value)} placeholder="e.g., Student wanted callback after 3pm" className="glass-input w-full px-3 py-2" />
+              <input type="text" value={followupReason} onChange={(e) => setFollowupReason(e.target.value)} placeholder={isCharter ? 'e.g., Customer wants options after 3pm' : 'e.g., Student wanted callback after 3pm'} className="glass-input w-full px-3 py-2" />
             </div>
           )}
           <div className="mb-4">

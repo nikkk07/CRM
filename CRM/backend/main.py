@@ -12,6 +12,9 @@ from auth import (
 )
 from schemas import LoginRequest, TokenResponse, EmployeeCreate
 from lead_ingestion import ingest_lead, normalize_phone
+from charter_ingestion import (
+    CharterValidationError, ingest_charter_lead, insert_charter_lead, validate_charter,
+)
 import r2_storage
 import io
 from sla_monitor import start_sla_monitor
@@ -392,6 +395,26 @@ async def ingest_lead_endpoint(data: dict):
     result = ingest_lead(data)
     return result
 
+@app.post("/api/leads/charter")
+def charter_lead_ingest(data: dict, authorization: str = Header(default="")):  # sync → threadpool
+    """Charter enquiries from bookmycharter.in (server-to-server).
+
+    Secured by its own shared secret: 'Authorization: Bearer <CHARTER_INGEST_TOKEN>'.
+    Creates a lead in the 'charter' segment; a repeat of the same trip returns
+    the existing lead with status 'duplicate' (HTTP 200, so the website does not
+    tell the customer their enquiry failed).
+    """
+    token = os.getenv("CHARTER_INGEST_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=503,
+                            detail="CHARTER_INGEST_TOKEN not configured on the CRM server")
+    if not secrets.compare_digest(authorization.encode(), f"Bearer {token}".encode()):
+        raise HTTPException(status_code=401, detail="Invalid charter token")
+    try:
+        return ingest_charter_lead(data)
+    except CharterValidationError as exc:
+        raise HTTPException(status_code=422, detail={"errors": exc.errors})
+
 @app.get("/api/leads")
 def get_leads(current_emp = Depends(get_current_employee)):  # sync → runs in threadpool (blocking DB)
     # Access: Admin or Sales only
@@ -411,7 +434,7 @@ def get_leads(current_emp = Depends(get_current_employee)):  # sync → runs in 
                    COALESCE(nr.cnt, 0) as not_reachable_count,
                    EXTRACT(EPOCH FROM (NOW() - l.created_at))/60 as age_minutes,
                    l.closure_outcome, l.guardian_name, l.qualifications, l.is_eligible, l.nios_interested,
-                   l.interest_track
+                   l.interest_track, COALESCE(l.segment, 'aviation'), l.charter_details
             FROM lead l
             LEFT JOIN (
                 SELECT lead_id, COUNT(*) AS cnt
@@ -432,7 +455,8 @@ def get_leads(current_emp = Depends(get_current_employee)):  # sync → runs in 
                 "not_reachable_count": r[17], "age_minutes": float(r[18]),
                 "closure_outcome": r[19], "guardian_name": r[20], "qualifications": r[21] or [],
                 "is_eligible": r[22], "nios_interested": r[23],
-                "interest_track": r[24]
+                "interest_track": r[24],
+                "segment": r[25], "charter_details": r[26]
             })
     return leads
 
@@ -504,14 +528,20 @@ async def close_lead(lead_id: str, data: dict, current_emp = Depends(get_current
         raise HTTPException(status_code=403, detail="Lead access requires Admin or Sales department")
 
     outcome = data.get('closure_outcome')
-    if outcome not in ('admission_completed', 'admission_aborted'):
-        raise HTTPException(status_code=400, detail="closure_outcome must be admission_completed or admission_aborted")
+    allowed = {
+        'aviation': ('admission_completed', 'admission_aborted'),
+        'charter': ('booking_confirmed', 'booking_lost'),
+    }
 
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM lead WHERE id = %s", (lead_id,))
-        if not cur.fetchone():
+        cur.execute("SELECT COALESCE(segment, 'aviation') FROM lead WHERE id = %s", (lead_id,))
+        row = cur.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Lead not found")
+        if outcome not in allowed[row[0]]:
+            raise HTTPException(status_code=400,
+                                detail=f"closure_outcome must be one of {allowed[row[0]]}")
 
         note = data.get('note')
         # status is the top-level state; closure_outcome is the sub-state
@@ -535,6 +565,22 @@ async def create_query(data: dict, current_emp = Depends(get_current_employee)):
     """Manual lead entry (Add Query). Reuses the normalized-phone dedup used by the Mongo bridge."""
     if current_emp['department'] not in ['Admin', 'Sales']:
         raise HTTPException(status_code=403, detail="Lead access requires Admin or Sales department")
+
+    if data.get('segment') == 'charter':
+        # Charter enquiry taken by phone / walk-in. Date and passengers may not
+        # be known yet on a first call, so only name, phone and route are required.
+        try:
+            cleaned = validate_charter(data, require_date=False)
+        except CharterValidationError as exc:
+            first = next(iter(exc.errors.items()))
+            raise HTTPException(status_code=400, detail=f"{first[0]}: {first[1]}")
+        with get_db() as conn:
+            cur = conn.cursor()
+            return insert_charter_lead(
+                cur, cleaned,
+                source=(data.get('utm_source') or 'Direct Call')[:80],
+                medium='manual', campaign='add_query', actor=current_emp["id"],
+            )
 
     name = (data.get('name') or '').strip()
     raw_phone = (data.get('phone') or '').strip()
