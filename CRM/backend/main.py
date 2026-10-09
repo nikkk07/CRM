@@ -145,7 +145,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://crm-three-smoky-26.vercel.app",
-        "http://localhost:3000"
+        "http://localhost:3000",
+        # Lead-capture websites that POST to /api/leads/ingest from the browser
+        "https://www.weoneaviation.com",
+        "https://weoneaviation.com",
+        "https://www.weoneaviation.in",
+        "https://weoneaviation.in",
+        "https://www.pilotschool.in",
+        "https://pilotschool.in",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
