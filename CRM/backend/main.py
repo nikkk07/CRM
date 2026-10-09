@@ -153,6 +153,8 @@ app.add_middleware(
         "https://weoneaviation.in",
         "https://www.pilotschool.in",
         "https://pilotschool.in",
+        "https://www.bookmycharter.in",
+        "https://bookmycharter.in",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
